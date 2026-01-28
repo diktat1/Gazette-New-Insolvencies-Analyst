@@ -7,15 +7,13 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # Gazette feed configuration
 # ---------------------------------------------------------------------------
-# Use the dedicated insolvency endpoint with simple category code.
 # Category 24 = Corporate Insolvency (all types: winding-up, administration,
 # receivership, CVL, meetings of creditors, voluntary arrangements)
-#
-# This is more reliable than the G-prefixed codes which can cause 500 errors.
 GAZETTE_CATEGORY_CODES = ["24"]
 
-# Base URL for the Gazette Atom feed - use the insolvency-specific endpoint
-GAZETTE_FEED_BASE = "https://www.thegazette.co.uk/insolvency/notice"
+# Base URL for the Gazette feed
+# Using all-notices endpoint with category filter (more reliable than /insolvency/)
+GAZETTE_FEED_BASE = "https://www.thegazette.co.uk/all-notices/notice"
 
 # Individual notice detail (HTML)
 GAZETTE_NOTICE_URL = "https://www.thegazette.co.uk/notice/"
