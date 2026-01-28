@@ -49,10 +49,14 @@ class GazetteEntry:
 # ---------------------------------------------------------------------------
 
 def _build_feed_url(page: int = 1, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
-    """Build the Atom feed URL with the configured category codes."""
+    """Build the Atom feed URL for insolvency notices."""
     params: list[tuple[str, str]] = []
-    for code in config.GAZETTE_CATEGORY_CODES:
-        params.append(("categorycode", code))
+
+    # Only add categorycode if NOT using the /insolvency/ endpoint
+    # (the /insolvency/ endpoint already filters to insolvency notices)
+    if "/insolvency/" not in config.GAZETTE_FEED_BASE:
+        for code in config.GAZETTE_CATEGORY_CODES:
+            params.append(("categorycode", code))
 
     if start_date:
         params.append(("start-publish-date", start_date))
