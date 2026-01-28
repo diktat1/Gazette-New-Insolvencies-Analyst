@@ -4,21 +4,28 @@ Score each insolvency notice for potential acquisition opportunity.
 The score (0-100) reflects how likely it is that there are meaningful
 assets or a viable business to buy. This is a heuristic – not financial advice.
 
+Key philosophy: the most important signal is whether the company was
+actually trading (website exists, filed real accounts, has charges) vs
+being a phantom/shell (no website, dormant/micro accounts, no filings).
+
 Scoring factors:
   + Administration / receivership (business may be sold as going concern)
   + Company filed full accounts (substance behind the company)
   + Has charges (secured lending = tangible assets existed)
   + Active SIC codes suggesting physical assets (manufacturing, retail, property)
-  + Website exists (operating business)
-  + Company has recent activity / not ancient dormant shell
+  + Website exists and verified (operating business)
+  + Company has recent filing activity
+  + Outstanding charges (assets still encumbered = real assets)
   - Members' voluntary liquidation (solvent wind-down, owners keep proceeds)
   - Company already dissolved
   - Micro-entity / dormant accounts (likely nothing there)
-  - Very old company with no recent filings
+  - Phantom company detected (multiple red flags)
+  - No website found
+  - Accounts or confirmation statement overdue
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.notice_parser import ParsedNotice
 from src.companies_house import CompanyProfile
@@ -71,12 +78,8 @@ _LOW_OPPORTUNITY_TYPES = [
 @dataclass
 class OpportunityAssessment:
     score: int = 0  # 0-100
-    signals: list = None  # Human-readable reasons
+    signals: list = field(default_factory=list)
     category: str = ""  # "HIGH", "MEDIUM", "LOW", "SKIP"
-
-    def __post_init__(self):
-        if self.signals is None:
-            self.signals = []
 
 
 def score_opportunity(
@@ -94,18 +97,19 @@ def score_opportunity(
 
     notice_type_lower = (notice.notice_type_label or "").lower()
     title_lower = (notice.company_name or "").lower()
+    raw_start = notice.raw_text.lower()[:500] if notice.raw_text else ""
 
     # -----------------------------------------------------------------------
     # Notice type signals
     # -----------------------------------------------------------------------
     for keyword in _GOOD_OPPORTUNITY_TYPES:
-        if keyword in notice_type_lower or keyword in title_lower or keyword in notice.raw_text.lower()[:500]:
+        if keyword in notice_type_lower or keyword in title_lower or keyword in raw_start:
             score += 15
             assessment.signals.append(f"Notice type suggests assets may be available ({keyword})")
             break
 
     for keyword in _LOW_OPPORTUNITY_TYPES:
-        if keyword in notice_type_lower or keyword in title_lower or keyword in notice.raw_text.lower()[:500]:
+        if keyword in notice_type_lower or keyword in title_lower or keyword in raw_start:
             score -= 20
             assessment.signals.append(f"Notice type suggests lower opportunity ({keyword})")
             break
@@ -114,7 +118,17 @@ def score_opportunity(
     # Companies House signals
     # -----------------------------------------------------------------------
     if profile:
-        # Company status
+        # ----- Phantom company detection (most important signal) -----
+        if profile.is_likely_phantom:
+            penalty = min(30, len(profile.phantom_reasons) * 10)
+            score -= penalty
+            assessment.signals.append(
+                f"LIKELY PHANTOM/SHELL COMPANY ({len(profile.phantom_reasons)} red flags)"
+            )
+            for reason in profile.phantom_reasons:
+                assessment.signals.append(f"  - {reason}")
+
+        # ----- Company status -----
         status = profile.company_status.lower()
         if status in ("active", "open"):
             score += 5
@@ -122,21 +136,47 @@ def score_opportunity(
         elif status in ("dissolved", "closed", "converted-closed"):
             score -= 15
             assessment.signals.append("Company already dissolved – likely too late")
+        elif status in ("liquidation", "administration", "receivership"):
+            score += 3
+            assessment.signals.append(f"Company status: {status} (process underway)")
 
-        # Filed full accounts (suggests substance)
+        # ----- Accounts quality -----
         if profile.has_filed_full_accounts:
-            score += 10
-            assessment.signals.append("Filed full/audited accounts – likely has substance")
-        elif profile.last_accounts_type in ("micro-entity", "dormant", "unaudited-abridged"):
+            score += 12
+            assessment.signals.append(
+                f"Filed {profile.last_accounts_type} accounts – likely has substance"
+            )
+        elif profile.last_accounts_type == "dormant":
+            score -= 15
+            assessment.signals.append("Dormant accounts – company was not trading")
+        elif profile.last_accounts_type == "micro-entity":
+            score -= 5
+            assessment.signals.append("Micro-entity accounts – limited substance")
+        elif profile.last_accounts_type in ("unaudited-abridged", "initial"):
+            score -= 2
+            assessment.signals.append(f"Accounts type: {profile.last_accounts_type}")
+        elif not profile.last_accounts_type and not profile.has_accounts_filings:
             score -= 10
-            assessment.signals.append(f"Only filed {profile.last_accounts_type} accounts – may be a shell")
+            assessment.signals.append("No accounts on file – never filed accounts")
 
-        # Has charges (secured lending implies assets existed)
+        # ----- Accounts recency -----
+        if profile.accounts_overdue:
+            score -= 5
+            assessment.signals.append("Accounts overdue")
+        if profile.confirmation_statement_overdue:
+            score -= 3
+            assessment.signals.append("Confirmation statement overdue")
+
+        # ----- Charges (secured lending implies assets) -----
         if profile.has_charges:
             score += 10
-            assessment.signals.append("Has secured charges – tangible assets likely existed")
+            charge_detail = f"Has {profile.total_charges} charges"
+            if profile.outstanding_charges:
+                charge_detail += f" ({profile.outstanding_charges} outstanding)"
+                score += 5  # Outstanding charges = assets still in play
+            assessment.signals.append(f"{charge_detail} – tangible assets likely existed")
 
-        # SIC codes suggesting physical assets
+        # ----- SIC codes -----
         if profile.sic_codes:
             for sic in profile.sic_codes:
                 for prefix in _ASSET_RICH_SIC_PREFIXES:
@@ -148,28 +188,45 @@ def score_opportunity(
                         break
                 else:
                     continue
-                break  # Only count SIC bonus once
+                break
 
-        # Company type
+        # ----- Company type -----
         if profile.company_type in ("plc", "european-public-limited-liability-company-se"):
             score += 5
-            assessment.signals.append("PLC – likely larger company with more assets")
+            assessment.signals.append("PLC – likely larger company")
 
-        # Recent activity
+        # ----- Filing activity -----
         if profile.has_recent_activity:
             score += 5
-            assessment.signals.append("Company has recent activity")
+            assessment.signals.append("Recent filing activity")
+        elif profile.last_filing_date:
+            assessment.signals.append(f"Last filing: {profile.last_filing_date}")
+
+        # ----- Filing history URL -----
+        if profile.filing_history_url:
+            assessment.signals.append(f"Filings: {profile.filing_history_url}")
+
+        # ----- Insolvency cases from CH -----
+        if profile.insolvency_cases:
+            latest = profile.insolvency_cases[-1]
+            case_info = f"CH insolvency case: {latest.case_type}"
+            if latest.practitioner_names:
+                case_info += f" (IPs: {', '.join(latest.practitioner_names)})"
+            assessment.signals.append(case_info)
+
     else:
-        # No Companies House data found
         score -= 5
         assessment.signals.append("Could not find on Companies House – may not be a registered company")
 
     # -----------------------------------------------------------------------
-    # Website exists
+    # Website – the strongest single signal of a real trading business
     # -----------------------------------------------------------------------
     if has_website:
-        score += 10
-        assessment.signals.append("Company website found – was operating recently")
+        score += 15
+        assessment.signals.append("Verified company website found – was operating recently")
+    else:
+        score -= 5
+        assessment.signals.append("No website found – may not have been actively trading")
 
     # -----------------------------------------------------------------------
     # Practitioner contact available

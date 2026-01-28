@@ -95,7 +95,7 @@
   </div>
   {% endif %}
 
-  {% if low_opportunities %}
+  {% if low_opportunities or skip_opportunities %}
   <div class="section">
     <div class="section-title low">Lower Potential ({{ low_count + skip_count }})</div>
     {% for n in low_opportunities %}

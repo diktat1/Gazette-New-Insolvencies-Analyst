@@ -26,7 +26,7 @@ def analyse_notices(lookback_days: Optional[int] = None) -> list[AnalysedNotice]
     2. Skip already-processed notices
     3. Parse each notice to extract structured data
     4. Look up the company on Companies House
-    5. Try to find the company's website
+    5. Try to find the company's website (web search + cross-check)
     6. Score the opportunity
     7. Return fully-enriched notices sorted by score
     """
@@ -113,14 +113,28 @@ def _analyse_single(entry: GazetteEntry) -> AnalysedNotice:
         notice.ch_accounts_type = profile.last_accounts_type
         notice.ch_created = profile.date_of_creation
 
+        # New: filing history and insolvency data
+        notice.ch_filing_history_url = profile.filing_history_url
+        notice.ch_total_filings = profile.total_filings
+        notice.ch_recent_filings = profile.recent_filings
+        notice.ch_insolvency_cases = profile.insolvency_cases
+        notice.ch_total_charges = profile.total_charges
+        notice.ch_outstanding_charges = profile.outstanding_charges
+        notice.ch_is_phantom = profile.is_likely_phantom
+        notice.ch_phantom_reasons = profile.phantom_reasons
+
         # Prefer Companies House address if we didn't get one from the notice
         if not notice.registered_address:
             notice.registered_address = profile.registered_address
 
     # -----------------------------------------------------------------------
-    # Step 3: Website lookup
+    # Step 3: Website lookup (web search + cross-check)
     # -----------------------------------------------------------------------
-    website = find_website(notice.company_name, notice.registered_address)
+    website = find_website(
+        notice.company_name,
+        registered_address=notice.registered_address,
+        company_number=notice.company_number,
+    )
     notice.website_url = website
     notice.google_search_url = build_google_search_url(notice.company_name)
 

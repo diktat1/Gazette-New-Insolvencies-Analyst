@@ -64,13 +64,25 @@ def run_once(days: int | None = None, send: bool = True, output_file: str | None
 
     for r in results:
         score_str = f"[{r.opportunity_category:6s} {r.opportunity_score:3d}/100]"
-        print(f"  {score_str}  {r.company_name}")
+        phantom_tag = " *** PHANTOM ***" if r.ch_is_phantom else ""
+        print(f"  {score_str}  {r.company_name}{phantom_tag}")
         if r.company_number:
             print(f"             Co #{r.company_number} | {r.notice_type}")
+        if r.ch_status:
+            print(f"             Status: {r.ch_status} | Accounts: {r.ch_accounts_type or 'none'}")
         if r.ch_url:
             print(f"             CH: {r.ch_url}")
+        if r.ch_filing_history_url:
+            print(f"             Filings: {r.ch_filing_history_url}")
         if r.website_url:
             print(f"             Web: {r.website_url}")
+        else:
+            print(f"             Web: NOT FOUND")
+        if r.ch_has_charges:
+            charges_str = f"             Charges: {r.ch_total_charges} total"
+            if r.ch_outstanding_charges:
+                charges_str += f" ({r.ch_outstanding_charges} outstanding)"
+            print(charges_str)
         if r.practitioners:
             for p in r.practitioners:
                 parts = [p.name, p.role, p.firm, p.email, p.phone]

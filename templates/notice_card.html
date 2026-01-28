@@ -1,26 +1,47 @@
 <div class="notice {{ n.opportunity_category|lower }}">
   <div class="notice-header">
-    <div class="company-name">{{ n.company_name }}</div>
+    <div class="company-name">{{ n.company_name }}{% if n.trading_name %} <span style="font-weight:400;color:#64748b;">(t/a {{ n.trading_name }})</span>{% endif %}</div>
     <span class="score-badge {{ n.opportunity_category|lower }}">{{ n.opportunity_score }}/100</span>
   </div>
+
+  {% if n.ch_is_phantom %}
+  <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px;color:#dc2626;font-weight:600;">
+    LIKELY PHANTOM / SHELL COMPANY
+    {% for reason in n.ch_phantom_reasons %}
+    <div style="font-weight:400;color:#991b1b;">- {{ reason }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="notice-meta">
     {% if n.company_number %}<span>Co. #{{ n.company_number }}</span>{% endif %}
     <span>{{ n.notice_type }}</span>
     {% if n.published_date %}<span>{{ n.published_date }}</span>{% endif %}
     {% if n.ch_status %}<span>Status: {{ n.ch_status }}</span>{% endif %}
+    {% if n.ch_accounts_type %}<span>Accounts: {{ n.ch_accounts_type }}</span>{% endif %}
   </div>
+
   <div class="links">
     {% if n.notice_url %}<a href="{{ n.notice_url }}">Gazette Notice</a>{% endif %}
     {% if n.ch_url %}<a href="{{ n.ch_url }}">Companies House</a>{% endif %}
-    {% if n.website_url %}<a href="{{ n.website_url }}">Company Website</a>{% endif %}
+    {% if n.ch_filing_history_url %}<a href="{{ n.ch_filing_history_url }}">Filing History</a>{% endif %}
+    {% if n.website_url %}<a href="{{ n.website_url }}" style="color:#16a34a;font-weight:600;">Company Website</a>{% endif %}
     {% if n.google_search_url %}<a href="{{ n.google_search_url }}">Google Search</a>{% endif %}
   </div>
+
   {% if n.registered_address %}
-  <div style="font-size: 13px; color: #475569;">{{ n.registered_address }}</div>
+  <div style="font-size: 13px; color: #475569; margin: 4px 0;">{{ n.registered_address }}</div>
   {% endif %}
+
+  {% if n.ch_has_charges %}
+  <div style="font-size: 13px; color: #475569; margin: 4px 0;">
+    Charges: {{ n.ch_total_charges }} total{% if n.ch_outstanding_charges %} ({{ n.ch_outstanding_charges }} outstanding){% endif %}
+  </div>
+  {% endif %}
+
   {% if n.practitioners %}
   <div class="ip-section">
-    <h4>Insolvency Practitioners</h4>
+    <h4>Insolvency Practitioners – Contact to enquire about assets</h4>
     {% for p in n.practitioners %}
     <div class="ip-entry">
       {% if p.name %}<span class="name">{{ p.name }}</span>{% endif %}
@@ -33,6 +54,29 @@
     {% endfor %}
   </div>
   {% endif %}
+
+  {% if n.ch_insolvency_cases %}
+  <div style="margin-top:8px;padding:8px 12px;background:#eff6ff;border-radius:6px;font-size:13px;">
+    <strong>CH Insolvency Record:</strong>
+    {% for case in n.ch_insolvency_cases %}
+    <div>Case {{ case.case_number }}: {{ case.case_type }}
+      {% if case.practitioner_names %} — {{ case.practitioner_names|join(', ') }}{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if n.ch_recent_filings %}
+  <div style="margin-top:8px;font-size:12px;color:#64748b;">
+    <strong>Recent Filings ({{ n.ch_total_filings }} total):</strong>
+    {% for f in n.ch_recent_filings[:5] %}
+    <div>{{ f.date }} – {{ f.description[:100] if f.description else f.filing_type }}
+      {% if f.document_url %}<a href="{{ f.document_url }}" style="color:#2563eb;">[view]</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {% if n.opportunity_signals %}
   <div class="signals">
     {% for sig in n.opportunity_signals %}

@@ -2,11 +2,11 @@
 Companies House API integration.
 
 Looks up companies by number or name to get:
-- Company status (active, dissolved, in liquidation, etc.)
-- SIC codes (industry)
-- Filing history (accounts, confirmation statements)
-- Registered address
-- Officers
+- Company profile (status, SIC codes, type, address)
+- Filing history (accounts, confirmation statements, insolvency filings)
+- Charges (secured debt – tangible assets)
+- Insolvency case details (IPs, dates, case type)
+- Officers (directors, secretaries)
 
 Free API: https://developer.company-information.service.gov.uk/
 Rate limit: 600 requests per 5 minutes.
@@ -15,6 +15,7 @@ Rate limit: 600 requests per 5 minutes.
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Optional
 
 import requests
@@ -22,6 +23,26 @@ import requests
 from src import config
 
 logger = logging.getLogger(__name__)
+
+CH_WEB_BASE = "https://find-and-update.company-information.service.gov.uk"
+
+
+@dataclass
+class FilingRecord:
+    date: str = ""
+    category: str = ""         # e.g. "accounts", "confirmation-statement", "insolvency"
+    description: str = ""
+    filing_type: str = ""      # e.g. "AA", "CS01", "AM01"
+    document_url: str = ""     # link to view the document on CH
+
+
+@dataclass
+class InsolvencyCase:
+    case_number: int = 0
+    case_type: str = ""        # e.g. "compulsory-liquidation", "administration"
+    practitioner_names: list = field(default_factory=list)
+    practitioner_addresses: list = field(default_factory=list)
+    dates: dict = field(default_factory=dict)  # e.g. {"wound-up-on": "2025-01-15"}
 
 
 @dataclass
@@ -34,16 +55,39 @@ class CompanyProfile:
     date_of_cessation: str = ""
     sic_codes: list = field(default_factory=list)
     registered_address: str = ""
-    has_charges: bool = False  # secured debt = possible tangible assets
+    has_charges: bool = False
     has_insolvency_history: bool = False
     last_accounts_date: str = ""
     last_accounts_type: str = ""
+    next_accounts_due: str = ""
     confirmation_statement_overdue: bool = False
     companies_house_url: str = ""
     officers: list = field(default_factory=list)
-    # Quick signals about whether there may be substance
+
+    # Substance indicators
     has_filed_full_accounts: bool = False
     has_recent_activity: bool = False
+    accounts_overdue: bool = False
+
+    # Filing history
+    filing_history_url: str = ""
+    recent_filings: list = field(default_factory=list)   # List[FilingRecord]
+    total_filings: int = 0
+    last_filing_date: str = ""
+    has_accounts_filings: bool = False
+    accounts_category_count: int = 0
+
+    # Insolvency details
+    insolvency_cases: list = field(default_factory=list)  # List[InsolvencyCase]
+
+    # Charges detail
+    total_charges: int = 0
+    outstanding_charges: int = 0
+    satisfied_charges: int = 0
+
+    # Phantom company signals
+    is_likely_phantom: bool = False
+    phantom_reasons: list = field(default_factory=list)
 
 
 def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
@@ -57,14 +101,14 @@ def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
         resp = requests.get(
             url,
             params=params,
-            auth=(config.COMPANIES_HOUSE_API_KEY, ""),  # API key as username, no password
+            auth=(config.COMPANIES_HOUSE_API_KEY, ""),
             timeout=config.REQUEST_TIMEOUT,
         )
         if resp.status_code == 404:
             logger.debug("Companies House 404 for %s", endpoint)
             return None
         if resp.status_code == 429:
-            logger.warning("Companies House rate limit hit – backing off")
+            logger.warning("Companies House rate limit hit – backing off 60s")
             time.sleep(60)
             return _api_get(endpoint, params)
         resp.raise_for_status()
@@ -74,12 +118,15 @@ def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Core lookup
+# ---------------------------------------------------------------------------
+
 def lookup_by_number(company_number: str) -> Optional[CompanyProfile]:
     """Look up a company by its Companies House registration number."""
     if not company_number:
         return None
 
-    # Normalise: pad to 8 digits if purely numeric
     num = company_number.strip().upper()
     if num.isdigit():
         num = num.zfill(8)
@@ -88,14 +135,24 @@ def lookup_by_number(company_number: str) -> Optional[CompanyProfile]:
     if not data:
         return None
 
-    return _build_profile(data)
+    profile = _build_profile(data)
+
+    # Enrich with filing history, charges, and insolvency data
+    _enrich_filing_history(profile)
+    _enrich_charges(profile)
+    if profile.has_insolvency_history:
+        _enrich_insolvency(profile)
+
+    # Run phantom detection after enrichment
+    _detect_phantom(profile)
+
+    return profile
 
 
 def search_by_name(company_name: str) -> Optional[CompanyProfile]:
     """
     Search Companies House by company name and return the best match.
-
-    This is a fallback when we don't have a company number from the notice.
+    Fallback when we don't have a company number from the notice.
     """
     if not company_name:
         return None
@@ -113,7 +170,6 @@ def search_by_name(company_name: str) -> Optional[CompanyProfile]:
     # Fall back to first result if close enough
     first = data["items"][0]
     first_name = first.get("title", "").upper()
-    # Simple fuzzy: check if the core words match
     name_words = set(name_upper.replace("LIMITED", "LTD").split())
     first_words = set(first_name.replace("LIMITED", "LTD").split())
     overlap = name_words & first_words
@@ -124,8 +180,12 @@ def search_by_name(company_name: str) -> Optional[CompanyProfile]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Profile builder
+# ---------------------------------------------------------------------------
+
 def _build_profile(data: dict) -> CompanyProfile:
-    """Build a CompanyProfile from the Companies House API response."""
+    """Build a CompanyProfile from the Companies House company endpoint response."""
     profile = CompanyProfile()
     profile.company_number = data.get("company_number", "")
     profile.company_name = data.get("company_name", "")
@@ -136,9 +196,8 @@ def _build_profile(data: dict) -> CompanyProfile:
     profile.sic_codes = data.get("sic_codes", [])
     profile.has_charges = data.get("has_charges", False)
     profile.has_insolvency_history = data.get("has_insolvency_history", False)
-    profile.companies_house_url = (
-        f"https://find-and-update.company-information.service.gov.uk/company/{profile.company_number}"
-    )
+    profile.companies_house_url = f"{CH_WEB_BASE}/company/{profile.company_number}"
+    profile.filing_history_url = f"{CH_WEB_BASE}/company/{profile.company_number}/filing-history"
 
     # Registered address
     addr = data.get("registered_office_address", {})
@@ -162,25 +221,233 @@ def _build_profile(data: dict) -> CompanyProfile:
         "full", "group", "medium", "small", "audit-exemption-subsidiary",
     )
 
+    next_acc = accounts.get("next_accounts", {})
+    profile.next_accounts_due = next_acc.get("due_on", "")
+    profile.accounts_overdue = accounts.get("overdue", False)
+
     # Confirmation statement
     conf = data.get("confirmation_statement", {})
     profile.confirmation_statement_overdue = conf.get("overdue", False)
 
-    # Recent activity heuristic: created less than 10 years ago and has filings
-    if profile.date_of_creation:
+    # Recent activity: check if last accounts were filed in last 2 years
+    if profile.last_accounts_date:
         try:
-            from datetime import datetime
-            created = datetime.strptime(profile.date_of_creation, "%Y-%m-%d")
-            age_years = (datetime.utcnow() - created).days / 365.25
-            profile.has_recent_activity = age_years < 10
+            last_acc_date = datetime.strptime(profile.last_accounts_date, "%Y-%m-%d")
+            profile.has_recent_activity = (datetime.utcnow() - last_acc_date).days < 730
         except (ValueError, TypeError):
             pass
 
     return profile
 
 
+# ---------------------------------------------------------------------------
+# Filing history enrichment
+# ---------------------------------------------------------------------------
+
+def _enrich_filing_history(profile: CompanyProfile) -> None:
+    """Fetch filing history and extract key details."""
+    num = profile.company_number
+    if not num:
+        return
+
+    data = _api_get(
+        f"/company/{num}/filing-history",
+        params={"items_per_page": 25, "category": "accounts,insolvency"},
+    )
+    if not data:
+        return
+
+    profile.total_filings = data.get("total_count", 0)
+
+    for item in data.get("items", []):
+        filing = FilingRecord()
+        filing.date = item.get("date", "")
+        filing.category = item.get("category", "")
+        filing.description = _filing_description(item)
+        filing.filing_type = item.get("type", "")
+
+        # Build document URL
+        links = item.get("links", {})
+        doc_meta = links.get("document_metadata", "")
+        if doc_meta:
+            filing.document_url = f"{CH_WEB_BASE}{links.get('self', '')}"
+        elif links.get("self"):
+            filing.document_url = f"{CH_WEB_BASE}{links['self']}"
+
+        profile.recent_filings.append(filing)
+
+        if filing.category == "accounts":
+            profile.accounts_category_count += 1
+            profile.has_accounts_filings = True
+
+    # Track last filing date
+    if profile.recent_filings:
+        profile.last_filing_date = profile.recent_filings[0].date
+
+
+def _filing_description(item: dict) -> str:
+    """Build a human-readable description from a filing item."""
+    desc = item.get("description", "")
+    desc_values = item.get("description_values", {})
+
+    # Replace template placeholders like {made_up_date}
+    if desc_values:
+        for key, val in desc_values.items():
+            desc = desc.replace(f"{{{key}}}", str(val))
+
+    return desc
+
+
+# ---------------------------------------------------------------------------
+# Charges enrichment
+# ---------------------------------------------------------------------------
+
+def _enrich_charges(profile: CompanyProfile) -> None:
+    """Fetch charges (secured debt) details."""
+    if not profile.has_charges:
+        return
+
+    num = profile.company_number
+    data = _api_get(f"/company/{num}/charges", params={"items_per_page": 25})
+    if not data:
+        return
+
+    profile.total_charges = data.get("total_count", 0)
+
+    for item in data.get("items", []):
+        status = item.get("status", "")
+        if status in ("outstanding", "part-satisfied"):
+            profile.outstanding_charges += 1
+        elif status in ("fully-satisfied", "satisfied"):
+            profile.satisfied_charges += 1
+
+
+# ---------------------------------------------------------------------------
+# Insolvency enrichment
+# ---------------------------------------------------------------------------
+
+def _enrich_insolvency(profile: CompanyProfile) -> None:
+    """Fetch insolvency case details from Companies House."""
+    num = profile.company_number
+    data = _api_get(f"/company/{num}/insolvency")
+    if not data:
+        return
+
+    for case_data in data.get("cases", []):
+        case = InsolvencyCase()
+        case.case_number = case_data.get("number", 0)
+        case.case_type = case_data.get("type", "")
+
+        # Practitioners
+        for prac in case_data.get("practitioners", []):
+            name = prac.get("name", "")
+            if name:
+                case.practitioner_names.append(name)
+            addr = prac.get("address", {})
+            if addr:
+                addr_parts = [
+                    addr.get("address_line_1", ""),
+                    addr.get("address_line_2", ""),
+                    addr.get("locality", ""),
+                    addr.get("postal_code", ""),
+                ]
+                case.practitioner_addresses.append(", ".join(p for p in addr_parts if p))
+
+        # Dates
+        for date_entry in case_data.get("dates", []):
+            date_type = date_entry.get("type", "")
+            date_val = date_entry.get("date", "")
+            if date_type and date_val:
+                case.dates[date_type] = date_val
+
+        profile.insolvency_cases.append(case)
+
+
+# ---------------------------------------------------------------------------
+# Phantom company detection
+# ---------------------------------------------------------------------------
+
+def _detect_phantom(profile: CompanyProfile) -> None:
+    """
+    Determine if the company is likely a phantom / shell / non-trading entity.
+
+    Signals that a company is phantom:
+    - No accounts ever filed
+    - Only micro-entity or dormant accounts
+    - Confirmation statement overdue (not maintaining the company)
+    - Accounts overdue
+    - No filing history at all
+    - Registered at a known formation agent address
+    - Very recently incorporated (less than 1 year) with no filings
+    """
+    reasons: list[str] = []
+
+    # No accounts ever filed
+    if not profile.last_accounts_date and not profile.has_accounts_filings:
+        if profile.date_of_creation:
+            try:
+                created = datetime.strptime(profile.date_of_creation, "%Y-%m-%d")
+                age_months = (datetime.utcnow() - created).days / 30.44
+                # New companies get ~21 months before first accounts are due
+                if age_months > 24:
+                    reasons.append("No accounts ever filed despite being >2 years old")
+            except (ValueError, TypeError):
+                pass
+
+    # Only dormant accounts
+    if profile.last_accounts_type == "dormant":
+        reasons.append("Only dormant accounts filed – company not trading")
+
+    # Only micro-entity with no charges and no recent filings
+    if profile.last_accounts_type == "micro-entity" and not profile.has_charges:
+        reasons.append("Micro-entity accounts with no secured charges – minimal substance")
+
+    # Confirmation statement overdue
+    if profile.confirmation_statement_overdue:
+        reasons.append("Confirmation statement overdue – company may be abandoned")
+
+    # Accounts overdue
+    if profile.accounts_overdue:
+        reasons.append("Accounts overdue – company may not be actively managed")
+
+    # No filings at all
+    if profile.total_filings == 0:
+        reasons.append("No filing history found on Companies House")
+
+    # Very few filings for an old company
+    if profile.total_filings > 0 and profile.date_of_creation:
+        try:
+            created = datetime.strptime(profile.date_of_creation, "%Y-%m-%d")
+            age_years = (datetime.utcnow() - created).days / 365.25
+            if age_years > 3 and profile.total_filings < 3:
+                reasons.append(f"Only {profile.total_filings} filings in {age_years:.0f} years – minimal activity")
+        except (ValueError, TypeError):
+            pass
+
+    # Already dissolved
+    if profile.company_status in ("dissolved", "closed", "converted-closed"):
+        reasons.append(f"Company status: {profile.company_status}")
+
+    # Last filing very old (more than 2 years ago)
+    if profile.last_filing_date:
+        try:
+            last_filed = datetime.strptime(profile.last_filing_date, "%Y-%m-%d")
+            days_since = (datetime.utcnow() - last_filed).days
+            if days_since > 730:
+                reasons.append(f"Last filing was {days_since // 365} years ago")
+        except (ValueError, TypeError):
+            pass
+
+    profile.phantom_reasons = reasons
+    profile.is_likely_phantom = len(reasons) >= 2
+
+
+# ---------------------------------------------------------------------------
+# Officers
+# ---------------------------------------------------------------------------
+
 def get_officers(company_number: str) -> list[dict]:
-    """Get the list of officers (directors, secretaries) for a company."""
+    """Get the list of current officers (directors, secretaries) for a company."""
     if not company_number:
         return []
 
@@ -195,7 +462,7 @@ def get_officers(company_number: str) -> list[dict]:
     officers = []
     for item in data.get("items", []):
         if item.get("resigned_on"):
-            continue  # skip resigned officers
+            continue
         officers.append({
             "name": item.get("name", ""),
             "role": item.get("officer_role", ""),

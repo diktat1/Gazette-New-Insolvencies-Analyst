@@ -40,7 +40,7 @@ class AnalysedNotice:
         # Insolvency practitioners
         self.practitioners: list = []
 
-        # Companies House
+        # Companies House – basic
         self.ch_status: str = ""
         self.ch_type: str = ""
         self.ch_sic_codes: list = []
@@ -48,6 +48,22 @@ class AnalysedNotice:
         self.ch_has_charges: bool = False
         self.ch_accounts_type: str = ""
         self.ch_created: str = ""
+
+        # Companies House – filing history
+        self.ch_filing_history_url: str = ""
+        self.ch_total_filings: int = 0
+        self.ch_recent_filings: list = []   # List[FilingRecord]
+
+        # Companies House – insolvency
+        self.ch_insolvency_cases: list = []  # List[InsolvencyCase]
+
+        # Companies House – charges
+        self.ch_total_charges: int = 0
+        self.ch_outstanding_charges: int = 0
+
+        # Companies House – phantom detection
+        self.ch_is_phantom: bool = False
+        self.ch_phantom_reasons: list = []
 
         # Website
         self.website_url: Optional[str] = None
@@ -112,12 +128,27 @@ def generate_email_plain(notices: list[AnalysedNotice], date_str: str = "") -> s
         if n.company_number:
             lines.append(f"  Company No: {n.company_number}")
         lines.append(f"  Type: {n.notice_type}")
+        if n.ch_status:
+            lines.append(f"  CH Status: {n.ch_status} | Accounts: {n.ch_accounts_type or 'none'}")
+        if n.ch_is_phantom:
+            lines.append(f"  *** LIKELY PHANTOM/SHELL ***")
         if n.ch_url:
             lines.append(f"  Companies House: {n.ch_url}")
+        if n.ch_filing_history_url:
+            lines.append(f"  Filings: {n.ch_filing_history_url}")
         if n.website_url:
             lines.append(f"  Website: {n.website_url}")
+        else:
+            lines.append(f"  Website: NOT FOUND")
         if n.notice_url:
             lines.append(f"  Gazette: {n.notice_url}")
+        if n.registered_address:
+            lines.append(f"  Address: {n.registered_address}")
+        if n.ch_has_charges:
+            charges_str = f"  Charges: {n.ch_total_charges} total"
+            if n.ch_outstanding_charges:
+                charges_str += f" ({n.ch_outstanding_charges} outstanding)"
+            lines.append(charges_str)
         if n.practitioners:
             for p in n.practitioners:
                 parts = []
@@ -132,9 +163,14 @@ def generate_email_plain(notices: list[AnalysedNotice], date_str: str = "") -> s
                 if p.phone:
                     parts.append(f"- {p.phone}")
                 lines.append(f"  IP: {' '.join(parts)}")
+        if n.ch_recent_filings:
+            lines.append(f"  Recent filings ({n.ch_total_filings} total):")
+            for f in n.ch_recent_filings[:5]:
+                desc = f.description[:80] if f.description else f.filing_type
+                lines.append(f"    {f.date} - {desc}")
         if n.opportunity_signals:
             for sig in n.opportunity_signals:
-                lines.append(f"  • {sig}")
+                lines.append(f"  {sig}")
         lines.append("")
 
     return "\n".join(lines)
