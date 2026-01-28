@@ -1,87 +1,195 @@
-<div class="notice {{ n.opportunity_category|lower }}">
-  <div class="notice-header">
-    <div class="company-name">{{ n.company_name }}{% if n.trading_name %} <span style="font-weight:400;color:#64748b;">(t/a {{ n.trading_name }})</span>{% endif %}</div>
-    <span class="score-badge {{ n.opportunity_category|lower }}">{{ n.opportunity_score }}/100</span>
+<div class="company-card {{ n.opportunity_category|lower }}">
+  <!-- Header -->
+  <div class="card-header">
+    <div>
+      <h3 class="company-title">
+        {% if n.ch_url %}<a href="{{ n.ch_url }}" title="View on Companies House">{{ n.company_name }}</a>{% else %}{{ n.company_name }}{% endif %}
+        {% if n.trading_name %}<span class="trading-name">(t/a {{ n.trading_name }})</span>{% endif %}
+      </h3>
+    </div>
+    <div class="score-pill {{ n.opportunity_category|lower }}">
+      {{ n.opportunity_score }}/100 {{ n.opportunity_category }}
+    </div>
   </div>
 
+  <!-- Phantom Alert -->
   {% if n.ch_is_phantom %}
-  <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:4px;padding:6px 10px;margin-bottom:8px;font-size:12px;color:#dc2626;font-weight:600;">
-    LIKELY PHANTOM / SHELL COMPANY
-    {% for reason in n.ch_phantom_reasons %}
-    <div style="font-weight:400;color:#991b1b;">- {{ reason }}</div>
-    {% endfor %}
+  <div class="phantom-alert">
+    <strong>⚠ Likely Phantom / Shell Company</strong>
+    <ul>
+      {% for reason in n.ch_phantom_reasons %}
+      <li>{{ reason }}</li>
+      {% endfor %}
+    </ul>
   </div>
   {% endif %}
 
-  <div class="notice-meta">
-    {% if n.company_number %}<span>Co. #{{ n.company_number }}</span>{% endif %}
-    <span>{{ n.notice_type }}</span>
-    {% if n.published_date %}<span>{{ n.published_date }}</span>{% endif %}
-    {% if n.ch_status %}<span>Status: {{ n.ch_status }}</span>{% endif %}
-    {% if n.ch_accounts_type %}<span>Accounts: {{ n.ch_accounts_type }}</span>{% endif %}
-  </div>
+  <div class="card-body">
+    <!-- Company Profile Grid -->
+    <div class="profile-grid">
+      <!-- Basic Details -->
+      <div class="profile-section">
+        <h4>Company Details</h4>
+        {% if n.company_number %}
+        <div class="profile-row">
+          <span class="profile-label">Company Number</span>
+          <span class="profile-value">
+            {% if n.ch_url %}<a href="{{ n.ch_url }}">{{ n.company_number }}</a>{% else %}{{ n.company_number }}{% endif %}
+          </span>
+        </div>
+        {% endif %}
+        <div class="profile-row">
+          <span class="profile-label">Notice Type</span>
+          <span class="profile-value">{{ n.notice_type or 'Insolvency' }}</span>
+        </div>
+        {% if n.ch_status %}
+        <div class="profile-row">
+          <span class="profile-label">CH Status</span>
+          <span class="profile-value">{{ n.ch_status }}</span>
+        </div>
+        {% endif %}
+        {% if n.ch_accounts_type %}
+        <div class="profile-row">
+          <span class="profile-label">Accounts Type</span>
+          <span class="profile-value">{{ n.ch_accounts_type }}</span>
+        </div>
+        {% endif %}
+        {% if n.ch_created %}
+        <div class="profile-row">
+          <span class="profile-label">Incorporated</span>
+          <span class="profile-value">{{ n.ch_created }}</span>
+        </div>
+        {% endif %}
+        {% if n.published_date %}
+        <div class="profile-row">
+          <span class="profile-label">Notice Date</span>
+          <span class="profile-value">{{ n.published_date }}</span>
+        </div>
+        {% endif %}
+      </div>
 
-  <div class="links">
-    {% if n.notice_url %}<a href="{{ n.notice_url }}">Gazette Notice</a>{% endif %}
-    {% if n.ch_url %}<a href="{{ n.ch_url }}">Companies House</a>{% endif %}
-    {% if n.ch_filing_history_url %}<a href="{{ n.ch_filing_history_url }}">Filing History</a>{% endif %}
-    {% if n.website_url %}<a href="{{ n.website_url }}" style="color:#16a34a;font-weight:600;">Company Website</a>{% endif %}
-    {% if n.google_search_url %}<a href="{{ n.google_search_url }}">Google Search</a>{% endif %}
-  </div>
-
-  {% if n.registered_address %}
-  <div style="font-size: 13px; color: #475569; margin: 4px 0;">{{ n.registered_address }}</div>
-  {% endif %}
-
-  {% if n.ch_has_charges %}
-  <div style="font-size: 13px; color: #475569; margin: 4px 0;">
-    Charges: {{ n.ch_total_charges }} total{% if n.ch_outstanding_charges %} ({{ n.ch_outstanding_charges }} outstanding){% endif %}
-  </div>
-  {% endif %}
-
-  {% if n.practitioners %}
-  <div class="ip-section">
-    <h4>Insolvency Practitioners – Contact to enquire about assets</h4>
-    {% for p in n.practitioners %}
-    <div class="ip-entry">
-      {% if p.name %}<span class="name">{{ p.name }}</span>{% endif %}
-      {% if p.role %} ({{ p.role }}){% endif %}
-      {% if p.firm %} — {{ p.firm }}{% endif %}
-      {% if p.email %}<br>Email: <a href="mailto:{{ p.email }}">{{ p.email }}</a>{% endif %}
-      {% if p.phone %}<br>Phone: {{ p.phone }}{% endif %}
-      {% if p.ip_number %}<br>IP No: {{ p.ip_number }}{% endif %}
+      <!-- Financial / Asset Indicators -->
+      <div class="profile-section">
+        <h4>Asset Indicators</h4>
+        <div class="profile-row">
+          <span class="profile-label">Website</span>
+          <span class="profile-value">
+            {% if n.website_url %}<a href="{{ n.website_url }}">Found ✓</a>{% else %}<span style="color:#dc2626;">Not found</span>{% endif %}
+          </span>
+        </div>
+        <div class="profile-row">
+          <span class="profile-label">Secured Charges</span>
+          <span class="profile-value">
+            {% if n.ch_has_charges %}
+              {{ n.ch_total_charges }} total{% if n.ch_outstanding_charges %} ({{ n.ch_outstanding_charges }} outstanding){% endif %}
+            {% else %}
+              None
+            {% endif %}
+          </span>
+        </div>
+        {% if n.ch_sic_codes %}
+        <div class="profile-row">
+          <span class="profile-label">SIC Codes</span>
+          <span class="profile-value">{{ n.ch_sic_codes|join(', ') }}</span>
+        </div>
+        {% endif %}
+        <div class="profile-row">
+          <span class="profile-label">Total Filings</span>
+          <span class="profile-value">
+            {% if n.ch_filing_history_url %}<a href="{{ n.ch_filing_history_url }}">{{ n.ch_total_filings }} filings</a>{% else %}{{ n.ch_total_filings }}{% endif %}
+          </span>
+        </div>
+      </div>
     </div>
-    {% endfor %}
-  </div>
-  {% endif %}
 
-  {% if n.ch_insolvency_cases %}
-  <div style="margin-top:8px;padding:8px 12px;background:#eff6ff;border-radius:6px;font-size:13px;">
-    <strong>CH Insolvency Record:</strong>
-    {% for case in n.ch_insolvency_cases %}
-    <div>Case {{ case.case_number }}: {{ case.case_type }}
-      {% if case.practitioner_names %} — {{ case.practitioner_names|join(', ') }}{% endif %}
+    <!-- Address -->
+    {% if n.registered_address %}
+    <div style="margin-top: 16px; padding: 12px 16px; background: #f8fafc; border-radius: 6px; font-size: 13px;">
+      <span style="color: #64748b;">Registered Address:</span>
+      <span style="color: #1a2332;">{{ n.registered_address }}</span>
     </div>
-    {% endfor %}
-  </div>
-  {% endif %}
+    {% endif %}
 
-  {% if n.ch_recent_filings %}
-  <div style="margin-top:8px;font-size:12px;color:#64748b;">
-    <strong>Recent Filings ({{ n.ch_total_filings }} total):</strong>
-    {% for f in n.ch_recent_filings[:5] %}
-    <div>{{ f.date }} – {{ f.description[:100] if f.description else f.filing_type }}
-      {% if f.document_url %}<a href="{{ f.document_url }}" style="color:#2563eb;">[view]</a>{% endif %}
+    <!-- Quick Links -->
+    <div class="quick-links">
+      {% if n.notice_url %}
+      <a href="{{ n.notice_url }}" class="quick-link primary">View Gazette Notice</a>
+      {% endif %}
+      {% if n.ch_url %}
+      <a href="{{ n.ch_url }}" class="quick-link">Companies House Profile</a>
+      {% endif %}
+      {% if n.ch_filing_history_url %}
+      <a href="{{ n.ch_filing_history_url }}" class="quick-link">Filing History</a>
+      {% endif %}
+      {% if n.website_url %}
+      <a href="{{ n.website_url }}" class="quick-link success">Company Website</a>
+      {% endif %}
+      {% if n.google_search_url %}
+      <a href="{{ n.google_search_url }}" class="quick-link">Google Search</a>
+      {% endif %}
     </div>
-    {% endfor %}
-  </div>
-  {% endif %}
 
-  {% if n.opportunity_signals %}
-  <div class="signals">
-    {% for sig in n.opportunity_signals %}
-    <div class="signal">{{ sig }}</div>
-    {% endfor %}
+    <!-- Insolvency Practitioners -->
+    {% if n.practitioners %}
+    <div class="ip-section">
+      <h4>Contact Insolvency Practitioners</h4>
+      {% for p in n.practitioners %}
+      <div class="ip-card">
+        {% if p.name %}
+        <div class="ip-name">{{ p.name }}</div>
+        {% endif %}
+        {% if p.role %}
+        <div class="ip-role">{{ p.role }}</div>
+        {% endif %}
+        {% if p.firm %}
+        <div class="ip-firm">{{ p.firm }}</div>
+        {% endif %}
+        <div class="ip-contact">
+          {% if p.email %}<a href="mailto:{{ p.email }}">{{ p.email }}</a>{% endif %}
+          {% if p.email and p.phone %} · {% endif %}
+          {% if p.phone %}{{ p.phone }}{% endif %}
+          {% if p.ip_number %}<br>IP No: {{ p.ip_number }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- CH Insolvency Record -->
+    {% if n.ch_insolvency_cases %}
+    <div style="margin-top: 16px; padding: 12px 16px; background: #fef3c7; border-radius: 6px; border: 1px solid #fbbf24; font-size: 13px;">
+      <strong style="color: #92400e;">Companies House Insolvency Record:</strong>
+      {% for case in n.ch_insolvency_cases %}
+      <div style="margin-top: 6px; color: #78350f;">
+        Case {{ case.case_number }}: {{ case.case_type }}
+        {% if case.practitioner_names %}<br>IPs: {{ case.practitioner_names|join(', ') }}{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Recent Filings -->
+    {% if n.ch_recent_filings %}
+    <div class="filings-section">
+      <h4>Recent Filings ({{ n.ch_total_filings }} total) {% if n.ch_filing_history_url %}<a href="{{ n.ch_filing_history_url }}" style="font-weight:400;color:#2563eb;font-size:12px;">View all →</a>{% endif %}</h4>
+      {% for f in n.ch_recent_filings[:5] %}
+      <div class="filing-row">
+        <span class="filing-date">{{ f.date }}</span>
+        <span class="filing-desc">{{ f.description[:80] if f.description else f.filing_type }}{% if f.description and f.description|length > 80 %}...{% endif %}</span>
+        {% if f.document_url %}<a href="{{ f.document_url }}" class="filing-link">View</a>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Analysis Signals -->
+    {% if n.opportunity_signals %}
+    <div class="signals-section">
+      <h4>Analysis Notes</h4>
+      {% for sig in n.opportunity_signals %}
+      <div class="signal">{{ sig }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
-  {% endif %}
 </div>
