@@ -1,4 +1,4 @@
-"""Fetch and parse the Gazette Atom feed for insolvency notices."""
+"""Fetch and parse the Gazette feed for insolvency notices."""
 
 import logging
 import time
@@ -48,11 +48,23 @@ class GazetteEntry:
 # Feed fetching
 # ---------------------------------------------------------------------------
 
-def _build_feed_url(page: int = 1, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
-    """Build the Atom feed URL with the configured category codes."""
+def _build_feed_url(page: int = 1, start_date: Optional[str] = None, end_date: Optional[str] = None, fmt: str = "json") -> str:
+    """
+    Build the feed URL for insolvency notices.
+
+    Args:
+        page: Page number for pagination
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        fmt: Format - 'json' for JSON, 'feed' for Atom XML
+    """
     params: list[tuple[str, str]] = []
-    for code in config.GAZETTE_CATEGORY_CODES:
-        params.append(("categorycode", code))
+
+    # Only add categorycode if NOT using the /insolvency/ endpoint
+    # (the /insolvency/ endpoint already filters to insolvency notices)
+    if "/insolvency/" not in config.GAZETTE_FEED_BASE:
+        for code in config.GAZETTE_CATEGORY_CODES:
+            params.append(("categorycode", code))
 
     if start_date:
         params.append(("start-publish-date", start_date))
@@ -63,32 +75,168 @@ def _build_feed_url(page: int = 1, start_date: Optional[str] = None, end_date: O
     params.append(("results-page-size", str(config.GAZETTE_PAGE_SIZE)))
     params.append(("results-page", str(page)))
 
-    return f"{config.GAZETTE_FEED_BASE}/data.feed?{urlencode(params)}"
+    extension = ".json" if fmt == "json" else ".feed"
+    return f"{config.GAZETTE_FEED_BASE}/data{extension}?{urlencode(params)}"
 
 
-def _fetch_page(url: str, retries: int = 3) -> Optional[str]:
+def _get_request_headers(fmt: str = "json") -> dict:
+    """Get appropriate headers for the format."""
+    headers = {
+        "User-Agent": "GazetteInsolvencyAnalyser/1.0 (+https://github.com)",
+    }
+    if fmt == "json":
+        headers["Accept"] = "application/json"
+    else:
+        headers["Accept"] = "application/atom+xml"
+    return headers
+
+
+def _fetch_page(url: str, fmt: str = "json", retries: int = 3) -> Optional[str]:
     """Fetch a single page of the feed with retry logic."""
+    headers = _get_request_headers(fmt)
+
     for attempt in range(retries):
         try:
+            logger.debug("Fetching URL: %s (attempt %d)", url, attempt + 1)
             resp = requests.get(
                 url,
-                headers=config.REQUEST_HEADERS,
+                headers=headers,
                 timeout=config.REQUEST_TIMEOUT,
             )
+
+            if resp.status_code == 500:
+                logger.warning("Server error (500), attempt %d/%d", attempt + 1, retries)
+                if attempt < retries - 1:
+                    time.sleep(2 ** (attempt + 1))
+                continue
+
             resp.raise_for_status()
             return resp.text
         except requests.RequestException as exc:
             wait = 2 ** (attempt + 1)
             logger.warning("Feed fetch attempt %d failed (%s), retrying in %ds", attempt + 1, exc, wait)
             time.sleep(wait)
+
     logger.error("Failed to fetch feed after %d retries: %s", retries, url)
     return None
 
 
-def _parse_feed(xml_text: str) -> list[GazetteEntry]:
+def _parse_json_feed(json_text: str) -> tuple[list[GazetteEntry], int]:
+    """Parse JSON response into GazetteEntry objects."""
+    import json
+
+    try:
+        data = json.loads(json_text)
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse JSON response: %s", e)
+        return [], 0
+
+    entries: list[GazetteEntry] = []
+    total = 0
+
+    # The JSON structure may vary - try common patterns
+    # Pattern 1: {"results": [...], "total": N}
+    # Pattern 2: {"entries": [...]}
+    # Pattern 3: {"notice": [...]}
+
+    results = None
+    if isinstance(data, dict):
+        total = data.get("total", 0) or data.get("totalResults", 0) or 0
+        results = data.get("results") or data.get("entries") or data.get("notice") or data.get("notices")
+
+        # Sometimes it's nested under a "feed" key
+        if not results and "feed" in data:
+            feed = data["feed"]
+            total = feed.get("total", 0) or feed.get("totalResults", 0) or 0
+            results = feed.get("entry") or feed.get("entries") or feed.get("results")
+    elif isinstance(data, list):
+        results = data
+
+    if not results:
+        logger.warning("No results found in JSON response. Keys: %s", list(data.keys()) if isinstance(data, dict) else "list")
+        return [], total
+
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+
+        # Extract notice ID - try various field names
+        notice_id = str(
+            item.get("notice-id") or
+            item.get("noticeId") or
+            item.get("id") or
+            item.get("notice", {}).get("id", "") or
+            ""
+        )
+
+        # Extract title
+        title = (
+            item.get("title") or
+            item.get("notice-title") or
+            item.get("noticeTitle") or
+            ""
+        )
+        if isinstance(title, dict):
+            title = title.get("value", "") or title.get("#text", "") or str(title)
+
+        # Extract dates
+        published = item.get("published") or item.get("publication-date") or item.get("publicationDate") or ""
+        updated = item.get("updated") or item.get("update-date") or published
+
+        # Notice type/code
+        notice_code = str(item.get("notice-code") or item.get("noticeCode") or item.get("notice-type") or "")
+        notice_type = item.get("notice-type-name") or item.get("noticeTypeName") or item.get("category") or ""
+
+        # Content - might be in various fields
+        content_html = item.get("content") or item.get("summary") or item.get("description") or ""
+        if isinstance(content_html, dict):
+            content_html = content_html.get("value", "") or content_html.get("#text", "") or ""
+
+        # Build notice URL
+        notice_url = item.get("link") or item.get("url") or ""
+        if isinstance(notice_url, list) and notice_url:
+            # Find alternate link
+            for link in notice_url:
+                if isinstance(link, dict) and link.get("rel") == "alternate":
+                    notice_url = link.get("href", "")
+                    break
+            if isinstance(notice_url, list):
+                notice_url = notice_url[0] if notice_url else ""
+        if isinstance(notice_url, dict):
+            notice_url = notice_url.get("href", "") or notice_url.get("url", "")
+
+        if not notice_url and notice_id:
+            notice_url = f"{config.GAZETTE_NOTICE_URL}{notice_id}"
+
+        entries.append(
+            GazetteEntry(
+                notice_id=notice_id,
+                title=title,
+                published=published,
+                updated=updated,
+                notice_code=notice_code,
+                notice_type=notice_type,
+                content_html=content_html,
+                notice_url=notice_url,
+            )
+        )
+
+    return entries, total
+
+
+def _parse_atom_feed(xml_text: str) -> tuple[list[GazetteEntry], int]:
     """Parse Atom XML into GazetteEntry objects."""
     soup = BeautifulSoup(xml_text, "lxml-xml")
     entries: list[GazetteEntry] = []
+
+    # Get total count
+    total = 0
+    total_tag = soup.find("f:total") or soup.find("openSearch:totalResults")
+    if total_tag:
+        try:
+            total = int(total_tag.get_text(strip=True))
+        except ValueError:
+            pass
 
     for entry in soup.find_all("entry"):
         notice_id = ""
@@ -149,26 +297,15 @@ def _parse_feed(xml_text: str) -> list[GazetteEntry]:
             )
         )
 
-    return entries
-
-
-def _get_total_results(xml_text: str) -> int:
-    """Extract total result count from feed metadata."""
-    soup = BeautifulSoup(xml_text, "lxml-xml")
-    total_tag = soup.find("f:total") or soup.find("openSearch:totalResults")
-    if total_tag:
-        try:
-            return int(total_tag.get_text(strip=True))
-        except ValueError:
-            pass
-    return 0
+    return entries, total
 
 
 def fetch_latest_notices(lookback_days: Optional[int] = None) -> list[GazetteEntry]:
     """
     Fetch all insolvency notices from the last N days.
 
-    Paginates through the Atom feed automatically.
+    Tries JSON format first, falls back to Atom XML if needed.
+    Paginates through the feed automatically.
     """
     days = lookback_days if lookback_days is not None else config.LOOKBACK_DAYS
     end_date = datetime.utcnow().strftime("%Y-%m-%d")
@@ -176,37 +313,59 @@ def fetch_latest_notices(lookback_days: Optional[int] = None) -> list[GazetteEnt
 
     logger.info("Fetching Gazette notices from %s to %s", start_date, end_date)
 
-    all_entries: list[GazetteEntry] = []
-    page = 1
+    # Try JSON format first, fall back to Atom
+    for fmt in ["json", "feed"]:
+        logger.info("Trying %s format...", fmt.upper())
 
-    while True:
-        url = _build_feed_url(page=page, start_date=start_date, end_date=end_date)
-        logger.debug("Fetching page %d: %s", page, url)
+        all_entries: list[GazetteEntry] = []
+        page = 1
+        total_known = 0
 
-        xml_text = _fetch_page(url)
-        if not xml_text:
-            break
+        while True:
+            url = _build_feed_url(page=page, start_date=start_date, end_date=end_date, fmt=fmt)
+            logger.debug("Fetching page %d: %s", page, url)
 
-        entries = _parse_feed(xml_text)
-        if not entries:
-            break
+            response_text = _fetch_page(url, fmt=fmt)
+            if not response_text:
+                logger.warning("Failed to fetch page %d with %s format", page, fmt)
+                break
 
-        all_entries.extend(entries)
+            # Parse based on format
+            if fmt == "json":
+                entries, total = _parse_json_feed(response_text)
+            else:
+                entries, total = _parse_atom_feed(response_text)
 
-        # Check if there are more pages
-        total = _get_total_results(xml_text)
-        if total and len(all_entries) >= total:
-            break
+            if total > 0:
+                total_known = total
 
-        page += 1
+            if not entries:
+                if page == 1:
+                    logger.warning("No entries found on first page with %s format", fmt)
+                break
 
-        # Safety valve – don't paginate forever
-        if page > 50:
-            logger.warning("Hit pagination safety limit at page 50")
-            break
+            all_entries.extend(entries)
+            logger.info("Page %d: got %d entries (total so far: %d)", page, len(entries), len(all_entries))
 
-        # Be polite
-        time.sleep(0.5)
+            # Check if there are more pages
+            if total_known and len(all_entries) >= total_known:
+                break
 
-    logger.info("Fetched %d notices across %d pages", len(all_entries), page)
-    return all_entries
+            page += 1
+
+            # Safety valve – don't paginate forever
+            if page > 50:
+                logger.warning("Hit pagination safety limit at page 50")
+                break
+
+            # Be polite
+            time.sleep(0.5)
+
+        if all_entries:
+            logger.info("Successfully fetched %d notices using %s format", len(all_entries), fmt.upper())
+            return all_entries
+
+        logger.warning("No entries found with %s format, trying next...", fmt)
+
+    logger.error("Failed to fetch notices with any format")
+    return []
