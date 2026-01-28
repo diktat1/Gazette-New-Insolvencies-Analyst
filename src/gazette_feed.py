@@ -82,12 +82,10 @@ def _build_feed_url(page: int = 1, start_date: Optional[str] = None, end_date: O
 def _get_request_headers(fmt: str = "json") -> dict:
     """Get appropriate headers for the format."""
     headers = {
-        "User-Agent": "GazetteInsolvencyAnalyser/1.0 (+https://github.com)",
+        # Use a standard User-Agent - custom ones may be blocked by WAF
+        "User-Agent": "Mozilla/5.0 (compatible; GazetteBot/1.0)",
+        "Accept": "*/*",
     }
-    if fmt == "json":
-        headers["Accept"] = "application/json"
-    else:
-        headers["Accept"] = "application/atom+xml"
     return headers
 
 
