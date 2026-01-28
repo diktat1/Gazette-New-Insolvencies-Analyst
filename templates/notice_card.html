@@ -1,0 +1,43 @@
+<div class="notice {{ n.opportunity_category|lower }}">
+  <div class="notice-header">
+    <div class="company-name">{{ n.company_name }}</div>
+    <span class="score-badge {{ n.opportunity_category|lower }}">{{ n.opportunity_score }}/100</span>
+  </div>
+  <div class="notice-meta">
+    {% if n.company_number %}<span>Co. #{{ n.company_number }}</span>{% endif %}
+    <span>{{ n.notice_type }}</span>
+    {% if n.published_date %}<span>{{ n.published_date }}</span>{% endif %}
+    {% if n.ch_status %}<span>Status: {{ n.ch_status }}</span>{% endif %}
+  </div>
+  <div class="links">
+    {% if n.notice_url %}<a href="{{ n.notice_url }}">Gazette Notice</a>{% endif %}
+    {% if n.ch_url %}<a href="{{ n.ch_url }}">Companies House</a>{% endif %}
+    {% if n.website_url %}<a href="{{ n.website_url }}">Company Website</a>{% endif %}
+    {% if n.google_search_url %}<a href="{{ n.google_search_url }}">Google Search</a>{% endif %}
+  </div>
+  {% if n.registered_address %}
+  <div style="font-size: 13px; color: #475569;">{{ n.registered_address }}</div>
+  {% endif %}
+  {% if n.practitioners %}
+  <div class="ip-section">
+    <h4>Insolvency Practitioners</h4>
+    {% for p in n.practitioners %}
+    <div class="ip-entry">
+      {% if p.name %}<span class="name">{{ p.name }}</span>{% endif %}
+      {% if p.role %} ({{ p.role }}){% endif %}
+      {% if p.firm %} — {{ p.firm }}{% endif %}
+      {% if p.email %}<br>Email: <a href="mailto:{{ p.email }}">{{ p.email }}</a>{% endif %}
+      {% if p.phone %}<br>Phone: {{ p.phone }}{% endif %}
+      {% if p.ip_number %}<br>IP No: {{ p.ip_number }}{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if n.opportunity_signals %}
+  <div class="signals">
+    {% for sig in n.opportunity_signals %}
+    <div class="signal">{{ sig }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
