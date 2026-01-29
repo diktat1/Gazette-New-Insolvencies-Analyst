@@ -6,12 +6,14 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 from datetime import datetime
 from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from src import config
+from src.pdf_report import generate_pdf_report
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,23 @@ class AnalysedNotice:
         self.opportunity_score: int = 0
         self.opportunity_category: str = ""
         self.opportunity_signals: list = []
+
+        # Sector and assets
+        self.sector: str = ""
+        self.sector_code: str = ""
+        self.estimated_assets: list = []
+
+        # Financial info (from accounts where available)
+        self.turnover: str = ""
+        self.total_assets: str = ""
+        self.net_assets: str = ""
+        self.total_liabilities: str = ""
+        self.employees: str = ""
+
+        # Draft email for IP
+        self.ip_email: str = ""
+        self.draft_email_subject: str = ""
+        self.draft_email_body: str = ""
 
 
 def generate_email_html(notices: list[AnalysedNotice], date_str: str = "") -> str:
@@ -177,35 +196,56 @@ def generate_email_plain(notices: list[AnalysedNotice], date_str: str = "") -> s
 
 
 def send_email(notices: list[AnalysedNotice]) -> bool:
-    """Send the daily email report. Returns True on success."""
+    """Send the daily email report with PDF attachment. Returns True on success."""
     if not config.SMTP_USER or not config.EMAIL_TO:
         logger.error("SMTP_USER or EMAIL_TO not configured – cannot send email")
         return False
 
     date_str = datetime.utcnow().strftime("%d %B %Y")
+    date_file = datetime.utcnow().strftime("%Y-%m-%d")
     high_count = sum(1 for n in notices if n.opportunity_category == "HIGH")
 
     subject = f"Gazette Insolvency Report – {date_str}"
     if high_count:
         subject += f" – {high_count} high-potential opportunities"
 
-    msg = MIMEMultipart("alternative")
+    # Use mixed multipart to support both alternative content and attachments
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = config.EMAIL_FROM or config.SMTP_USER
     msg["To"] = config.EMAIL_TO
     if config.EMAIL_CC:
         msg["Cc"] = ", ".join(config.EMAIL_CC)
 
+    # Create alternative part for plain text and HTML
+    msg_alternative = MIMEMultipart("alternative")
+
     # Plain text part
     plain = generate_email_plain(notices, date_str)
-    msg.attach(MIMEText(plain, "plain", "utf-8"))
+    msg_alternative.attach(MIMEText(plain, "plain", "utf-8"))
 
     # HTML part
     try:
         html = generate_email_html(notices, date_str)
-        msg.attach(MIMEText(html, "html", "utf-8"))
+        msg_alternative.attach(MIMEText(html, "html", "utf-8"))
     except Exception as exc:
         logger.warning("Could not render HTML template, sending plain text only: %s", exc)
+
+    msg.attach(msg_alternative)
+
+    # Generate and attach PDF report
+    try:
+        pdf_bytes = generate_pdf_report(notices, date_str)
+        pdf_attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
+        pdf_attachment.add_header(
+            "Content-Disposition",
+            "attachment",
+            filename=f"insolvency-report-{date_file}.pdf"
+        )
+        msg.attach(pdf_attachment)
+        logger.info("PDF report attached (%d bytes)", len(pdf_bytes))
+    except Exception as exc:
+        logger.warning("Could not generate PDF attachment: %s", exc)
 
     # All recipients
     recipients = [config.EMAIL_TO] + config.EMAIL_CC

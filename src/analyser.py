@@ -15,6 +15,7 @@ from src.website_finder import find_website, build_google_search_url
 from src.opportunity_scorer import score_opportunity
 from src.email_report import AnalysedNotice
 from src.db import is_notice_processed, mark_notice_processed
+from src.sector_utils import get_sector_from_sic, estimate_key_assets
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,11 @@ def _analyse_single(entry: GazetteEntry) -> AnalysedNotice:
     parsed = parse_notice(entry.title, entry.content_html, entry.notice_type)
 
     notice.notice_id = entry.notice_id
-    notice.notice_url = entry.notice_url
+    # Clean up notice URL - remove data.ttl suffix if present
+    notice_url = entry.notice_url
+    if notice_url and "/data.ttl" in notice_url:
+        notice_url = notice_url.replace("/data.ttl", "")
+    notice.notice_url = notice_url
     notice.notice_type = entry.notice_type or parsed.notice_type_label
     notice.published_date = entry.published
     notice.company_name = parsed.company_name
@@ -139,7 +144,35 @@ def _analyse_single(entry: GazetteEntry) -> AnalysedNotice:
     notice.google_search_url = build_google_search_url(notice.company_name)
 
     # -----------------------------------------------------------------------
-    # Step 4: Score the opportunity
+    # Step 4: Sector identification and asset estimation
+    # -----------------------------------------------------------------------
+    if notice.ch_sic_codes:
+        sector_name, sector_code = get_sector_from_sic(notice.ch_sic_codes)
+        notice.sector = sector_name
+        notice.sector_code = sector_code
+
+        notice.estimated_assets = estimate_key_assets(
+            notice.ch_sic_codes,
+            has_charges=notice.ch_has_charges,
+            accounts_type=notice.ch_accounts_type,
+        )
+
+    # -----------------------------------------------------------------------
+    # Step 5: Extract IP email and generate draft email
+    # -----------------------------------------------------------------------
+    if notice.practitioners:
+        for p in notice.practitioners:
+            if hasattr(p, 'email') and p.email:
+                notice.ip_email = p.email
+                break
+
+        # Generate draft email for the IP
+        ip_name = notice.practitioners[0].name if notice.practitioners else "Sir/Madam"
+        notice.draft_email_subject = f"Expression of Interest - {notice.company_name}"
+        notice.draft_email_body = _generate_draft_email(notice, ip_name)
+
+    # -----------------------------------------------------------------------
+    # Step 6: Score the opportunity
     # -----------------------------------------------------------------------
     assessment = score_opportunity(
         parsed,
@@ -151,3 +184,33 @@ def _analyse_single(entry: GazetteEntry) -> AnalysedNotice:
     notice.opportunity_signals = assessment.signals
 
     return notice
+
+
+def _generate_draft_email(notice, ip_name: str) -> str:
+    """Generate a draft email expressing interest to the IP."""
+    assets_str = ", ".join(notice.estimated_assets[:3]) if notice.estimated_assets else "the business and its assets"
+
+    return f"""Dear {ip_name},
+
+I am writing to express my interest in acquiring assets or the business of {notice.company_name} (Company No: {notice.company_number or 'N/A'}).
+
+I understand the company is currently in {notice.notice_type or 'insolvency proceedings'} and I would be keen to discuss:
+
+- The availability of {assets_str}
+- Any ongoing business operations that may be available for sale
+- Timeline and process for submitting expressions of interest
+
+I am a serious buyer with funds available to move quickly on suitable opportunities.
+
+Please could you provide further details on:
+1. What assets/business operations are available for sale
+2. The process and timeline for sale
+3. Any information memorandum or asset list available
+
+I would be happy to provide proof of funds and sign any required NDAs.
+
+I look forward to hearing from you.
+
+Kind regards,
+[Your Name]
+[Your Contact Details]"""
