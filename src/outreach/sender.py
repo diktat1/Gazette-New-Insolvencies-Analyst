@@ -136,6 +136,18 @@ def send_email(
     """
     cc_emails = cc_emails or []
 
+    # Check for test recipient override
+    test_override = OUTREACH_CONFIG.get('TEST_RECIPIENT_OVERRIDE', '')
+    if test_override:
+        original_to = to_email
+        original_cc = cc_emails
+        to_email = test_override
+        cc_emails = []  # Don't CC anyone in test mode
+        subject = f"[TEST] {subject}"
+        # Add note about original recipients to body
+        body = f"*** TEST MODE - Original recipients: {original_to} (CC: {', '.join(original_cc) if original_cc else 'none'}) ***\n\n{body}"
+        logger.info("[TEST MODE] Redirecting email from %s to %s", original_to, test_override)
+
     # Check if dry run
     if dry_run or OUTREACH_CONFIG.get('DRY_RUN', False):
         logger.info("[DRY RUN] Would send email to %s (CC: %s)", to_email, cc_emails)

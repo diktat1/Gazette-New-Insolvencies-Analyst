@@ -75,6 +75,9 @@ OUTREACH_CONFIG = {
 
     # Company contact cooldown
     'COMPANY_CONTACT_COOLDOWN_DAYS': _get_int('OUTREACH_COMPANY_COOLDOWN', 30),
+
+    # Test mode - redirect all outreach to this email instead of real recipients
+    'TEST_RECIPIENT_OVERRIDE': os.getenv('OUTREACH_TEST_RECIPIENT', ''),
 }
 
 
