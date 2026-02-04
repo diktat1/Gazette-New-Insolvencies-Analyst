@@ -142,7 +142,7 @@ def score_opportunity(
 
         # ----- Accounts quality -----
         if profile.has_filed_full_accounts:
-            score += 12
+            score += 18  # Strong signal - company has real substance
             assessment.signals.append(
                 f"Filed {profile.last_accounts_type} accounts – likely has substance"
             )
@@ -150,8 +150,8 @@ def score_opportunity(
             score -= 15
             assessment.signals.append("Dormant accounts – company was not trading")
         elif profile.last_accounts_type == "micro-entity":
-            score -= 5
-            assessment.signals.append("Micro-entity accounts – limited substance")
+            # Don't penalize micro-entity - many real small businesses file these
+            assessment.signals.append("Micro-entity accounts")
         elif profile.last_accounts_type in ("unaudited-abridged", "initial"):
             score -= 2
             assessment.signals.append(f"Accounts type: {profile.last_accounts_type}")
@@ -222,11 +222,9 @@ def score_opportunity(
     # Website – the strongest single signal of a real trading business
     # -----------------------------------------------------------------------
     if has_website:
-        score += 15
+        score += 20  # Strong signal - company was actively trading
         assessment.signals.append("Verified company website found – was operating recently")
-    else:
-        score -= 5
-        assessment.signals.append("No website found – may not have been actively trading")
+    # Don't penalize for no website - many legit companies don't have one
 
     # -----------------------------------------------------------------------
     # Practitioner contact available
@@ -245,9 +243,10 @@ def score_opportunity(
     score = max(0, min(100, score))
     assessment.score = score
 
-    if score >= 65:
+    # Adjusted thresholds - more opportunities qualify as HIGH
+    if score >= 50:
         assessment.category = "HIGH"
-    elif score >= 40:
+    elif score >= 35:
         assessment.category = "MEDIUM"
     elif score >= 20:
         assessment.category = "LOW"
