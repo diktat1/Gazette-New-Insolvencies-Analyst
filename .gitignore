@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 data/gazette_tracker.db
 data/*.db
+!data/outreach.db
 data/*.html
 *.egg-info/
 dist/

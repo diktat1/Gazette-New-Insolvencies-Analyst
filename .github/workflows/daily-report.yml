@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run insolvency analyser and send email
+      - name: Run insolvency analyser, send report, and outreach
         env:
           COMPANIES_HOUSE_API_KEY: ${{ secrets.COMPANIES_HOUSE_API_KEY }}
           SMTP_HOST: smtp.gmail.com
@@ -35,5 +35,22 @@ jobs:
           EMAIL_FROM: ${{ secrets.SMTP_USER }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           LOOKBACK_DAYS: 1
+          # Outreach settings
+          OUTREACH_SENDER_NAME: ${{ secrets.OUTREACH_SENDER_NAME }}
+          OUTREACH_SENDER_PHONE: ${{ secrets.OUTREACH_SENDER_PHONE }}
+          OUTREACH_MIN_SCORE: 40
         run: |
-          python main.py
+          python main.py --outreach
+
+      - name: Commit outreach database
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add data/outreach.db
+          git diff --staged --quiet || git commit -m "Update outreach database [skip ci]"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}

@@ -155,9 +155,80 @@ The system uses date-filtered queries rather than relying on "latest 100" to ens
 
 ## Running in production
 
-For daily automated emails, you have several options:
+### GitHub Actions (recommended)
+
+The repo includes a GitHub Actions workflow that runs daily at 7:00 UTC. To enable:
+
+1. Go to your repo on GitHub → **Settings** → **Secrets and variables** → **Actions**
+2. Add these **Repository secrets**:
+
+| Secret | Description |
+|--------|-------------|
+| `COMPANIES_HOUSE_API_KEY` | Your Companies House API key |
+| `SMTP_USER` | Your email address (e.g., you@yourdomain.com) |
+| `SMTP_PASSWORD` | Gmail App Password or SMTP password |
+| `EMAIL_TO` | Where to send the daily summary |
+| `OUTREACH_SENDER_NAME` | Your name for outreach emails |
+| `OUTREACH_SENDER_PHONE` | Your phone number for callbacks |
+
+3. Go to **Actions** tab → Enable workflows if prompted
+4. Optionally click "Run workflow" to test manually
+
+The workflow:
+- Runs daily at 7:00 UTC (≈8:00 UK time)
+- Sends you a summary email of new insolvencies
+- Sends outreach emails to qualified Insolvency Practitioners
+- Commits the outreach database back to the repo (tracks contact history)
+
+### Other options
 
 1. **Cron job**: `0 8 * * * cd /path/to/project && .venv/bin/python main.py`
 2. **Built-in scheduler**: `python main.py --schedule` (keeps running)
 3. **Systemd service**: Create a unit file for the scheduler
 4. **Cloud function**: Deploy as an AWS Lambda / GCP Cloud Function triggered by CloudWatch/Cloud Scheduler
+
+## Automated Outreach System
+
+The outreach system automatically contacts Insolvency Practitioners about high-scoring opportunities.
+
+### How it works
+
+1. **Qualification**: Only companies scoring ≥40 with valid IP emails are queued
+2. **Batching**: Multiple companies from the same IP firm are grouped into one email
+3. **Warmup**: Starts with 5 emails/day, gradually increases to avoid spam filters
+4. **Follow-ups**: Sends polite follow-ups at day 7 and day 14 if no reply
+5. **Tracking**: SQLite database tracks all contacts to prevent duplicates
+
+### CLI commands
+
+```bash
+# View outreach status and queue
+python outreach.py status
+
+# Preview what would be sent
+python outreach.py preview
+
+# Send pending outreach (respects warmup limits)
+python outreach.py send
+
+# Process follow-ups
+python outreach.py followups
+
+# Mark a reply received
+python outreach.py reply <batch_id>
+
+# Block an email/domain from future outreach
+python outreach.py block <email_or_domain>
+```
+
+### Running with outreach
+
+```bash
+# Full pipeline: analyse + report + outreach
+python main.py --outreach
+
+# Dry run (no emails sent)
+python main.py --outreach-dry-run
+```
+
+See `docs/OUTREACH_SYSTEM_DESIGN.md` for detailed architecture.
