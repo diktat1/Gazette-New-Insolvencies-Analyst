@@ -6,6 +6,15 @@ on:
     # Using 7:00 UTC to approximate 8:00 UK time
     - cron: '0 7 * * *'
   workflow_dispatch:  # Allow manual trigger from GitHub UI
+    inputs:
+      test_mode:
+        description: 'Send test email only (no Gazette scan)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   send-report:
@@ -40,7 +49,11 @@ jobs:
           OUTREACH_SENDER_PHONE: "+44 7985 250 883"
           OUTREACH_MIN_SCORE: 40
         run: |
-          python main.py --outreach
+          if [ "${{ github.event.inputs.test_mode }}" = "true" ]; then
+            python main.py --test-email ${{ secrets.EMAIL_TO }}
+          else
+            python main.py --outreach
+          fi
 
       - name: Commit outreach database
         run: |
