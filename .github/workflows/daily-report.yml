@@ -50,8 +50,10 @@ jobs:
           OUTREACH_MIN_SCORE: 40
           # Test mode - redirect all outreach to EMAIL_TO instead of real IPs
           OUTREACH_TEST_RECIPIENT: ${{ github.event.inputs.test_mode == 'true' && secrets.EMAIL_TO || '' }}
-          # Limit sends in test mode to 10
-          OUTREACH_MAX_SENDS: ${{ github.event.inputs.test_mode == 'true' && '10' || '0' }}
+          # Limit sends in test mode to 1 (just one example)
+          OUTREACH_MAX_SENDS: ${{ github.event.inputs.test_mode == 'true' && '1' || '0' }}
+          # Skip slow website checks in test mode
+          SKIP_WEBSITE_CHECK: ${{ github.event.inputs.test_mode == 'true' && 'true' || 'false' }}
         run: |
           python main.py --outreach
 
