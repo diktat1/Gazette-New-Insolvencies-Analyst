@@ -36,8 +36,8 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           LOOKBACK_DAYS: 1
           # Outreach settings
-          OUTREACH_SENDER_NAME: ${{ secrets.OUTREACH_SENDER_NAME }}
-          OUTREACH_SENDER_PHONE: ${{ secrets.OUTREACH_SENDER_PHONE }}
+          OUTREACH_SENDER_NAME: "Kamil Altintasoglu"
+          OUTREACH_SENDER_PHONE: "+44 7985 250 883"
           OUTREACH_MIN_SCORE: 40
         run: |
           python main.py --outreach

@@ -168,8 +168,6 @@ The repo includes a GitHub Actions workflow that runs daily at 7:00 UTC. To enab
 | `SMTP_USER` | Your email address (e.g., you@yourdomain.com) |
 | `SMTP_PASSWORD` | Gmail App Password or SMTP password |
 | `EMAIL_TO` | Where to send the daily summary |
-| `OUTREACH_SENDER_NAME` | Your name for outreach emails |
-| `OUTREACH_SENDER_PHONE` | Your phone number for callbacks |
 
 3. Go to **Actions** tab → Enable workflows if prompted
 4. Optionally click "Run workflow" to test manually
