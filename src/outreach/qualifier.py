@@ -89,17 +89,30 @@ def should_queue_outreach(notice, practitioners: Optional[list] = None) -> tuple
     return True, "Qualified for outreach"
 
 
-def qualify_notices(notices: list) -> tuple[list, list]:
+def qualify_notices(notices: list, max_qualified: int = 0) -> tuple[list, list]:
     """
     Qualify a list of notices for outreach.
+
+    Args:
+        notices: List of AnalysedNotice objects
+        max_qualified: Stop after finding this many qualified notices (0 = no limit)
 
     Returns:
         (qualified_notices, skipped_with_reasons)
     """
+    # Get limit from config if not specified
+    if max_qualified == 0:
+        max_qualified = OUTREACH_CONFIG.get('MAX_SENDS_PER_RUN', 0)
+
     qualified = []
     skipped = []
 
     for notice in notices:
+        # Early stop if we have enough
+        if max_qualified > 0 and len(qualified) >= max_qualified:
+            logger.info("Reached max qualified limit (%d), stopping early", max_qualified)
+            break
+
         should_queue, reason = should_queue_outreach(notice)
         if should_queue:
             qualified.append(notice)
