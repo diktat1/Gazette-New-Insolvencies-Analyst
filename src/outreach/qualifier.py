@@ -1,0 +1,119 @@
+"""
+Qualification logic for outreach.
+
+Determines which notices should be queued for outreach based on:
+- Opportunity score threshold
+- Valid practitioner emails
+- Blocklist status
+- Recent contact history
+- Company status
+"""
+
+import re
+import logging
+from typing import Optional
+
+from src.outreach.db import is_email_blocked, was_company_contacted_recently
+from src.outreach.config import OUTREACH_CONFIG
+
+logger = logging.getLogger(__name__)
+
+
+def is_valid_email(email: str) -> bool:
+    """Check if an email address is valid format."""
+    if not email:
+        return False
+    # Basic email validation
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, email.strip()))
+
+
+def get_valid_practitioners(practitioners: list) -> list:
+    """Filter practitioners to those with valid email addresses."""
+    valid = []
+    for p in practitioners:
+        email = getattr(p, 'email', None) or (p.get('email') if isinstance(p, dict) else None)
+        if email and is_valid_email(email):
+            valid.append(p)
+    return valid
+
+
+def should_queue_outreach(notice, practitioners: Optional[list] = None) -> tuple[bool, str]:
+    """
+    Determine if a notice should be queued for outreach.
+
+    Args:
+        notice: AnalysedNotice object
+        practitioners: Optional list of practitioners (defaults to notice.practitioners)
+
+    Returns:
+        (should_queue: bool, reason: str)
+    """
+    if practitioners is None:
+        practitioners = getattr(notice, 'practitioners', []) or []
+
+    # Gate 1: Minimum quality threshold
+    min_score = OUTREACH_CONFIG.get('MIN_OUTREACH_SCORE', 40)
+    score = getattr(notice, 'opportunity_score', 0)
+    if score < min_score:
+        return False, f"Score {score} below threshold {min_score}"
+
+    # Gate 2: Must have at least one valid practitioner email
+    valid_practitioners = get_valid_practitioners(practitioners)
+    if not valid_practitioners:
+        return False, "No valid practitioner emails found"
+
+    # Gate 3: Check blocklist
+    for p in valid_practitioners:
+        email = getattr(p, 'email', None) or (p.get('email') if isinstance(p, dict) else None)
+        if email and is_email_blocked(email):
+            return False, f"Practitioner {email} is on blocklist"
+
+    # Gate 4: Don't re-contact about same company within 30 days
+    company_number = getattr(notice, 'company_number', None)
+    if company_number and was_company_contacted_recently(company_number, days=30):
+        return False, f"Already contacted about company {company_number} recently"
+
+    # Gate 5: Skip dissolved companies
+    ch_status = getattr(notice, 'ch_status', '').lower()
+    if ch_status in ['dissolved', 'closed', 'converted-closed']:
+        return False, f"Company status is {ch_status}"
+
+    # Gate 6: Skip if notice type is unfavorable (e.g., MVL typically means solvent)
+    notice_type = getattr(notice, 'notice_type', '').lower()
+    if 'members voluntary' in notice_type or 'mvl' in notice_type.replace("'", ""):
+        # MVL is typically a solvent liquidation, less interesting
+        if score < 60:  # Allow high-scoring MVLs through
+            return False, "Members voluntary liquidation (typically solvent)"
+
+    return True, "Qualified for outreach"
+
+
+def qualify_notices(notices: list) -> tuple[list, list]:
+    """
+    Qualify a list of notices for outreach.
+
+    Returns:
+        (qualified_notices, skipped_with_reasons)
+    """
+    qualified = []
+    skipped = []
+
+    for notice in notices:
+        should_queue, reason = should_queue_outreach(notice)
+        if should_queue:
+            qualified.append(notice)
+            logger.debug("Qualified: %s (%s)", notice.company_name, reason)
+        else:
+            skipped.append({
+                'notice': notice,
+                'reason': reason,
+            })
+            logger.debug("Skipped: %s - %s", notice.company_name, reason)
+
+    logger.info(
+        "Qualification complete: %d qualified, %d skipped",
+        len(qualified), len(skipped)
+    )
+
+    return qualified, skipped

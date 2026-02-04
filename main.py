@@ -7,12 +7,16 @@ Daily monitor for UK Gazette insolvency notices. Analyses each notice,
 enriches it with Companies House data and website checks, scores the
 opportunity for asset/business acquisition, and emails a report.
 
+Optionally runs automated outreach to Insolvency Practitioners.
+
 Usage:
-    python main.py                  # Run once (fetch, analyse, email)
-    python main.py --no-email       # Run analysis only, print to stdout
-    python main.py --schedule       # Run daily on a schedule
-    python main.py --days 7         # Look back 7 days instead of default
+    python main.py                     # Run once (fetch, analyse, email)
+    python main.py --no-email          # Run analysis only, print to stdout
+    python main.py --schedule          # Run daily on a schedule
+    python main.py --days 7            # Look back 7 days instead of default
     python main.py --output report.html  # Save HTML report to file
+    python main.py --outreach          # Enable automated IP outreach
+    python main.py --outreach-dry-run  # Preview outreach without sending
 """
 
 import argparse
@@ -27,6 +31,14 @@ from src.analyser import analyse_notices
 from src.email_report import send_email, generate_email_html, generate_email_plain
 from src import config
 
+# Outreach system
+from src.outreach import (
+    run_outreach_pipeline,
+    send_summary_email,
+    init_outreach_db,
+    OUTREACH_CONFIG,
+)
+
 
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
@@ -40,7 +52,13 @@ def setup_logging(verbose: bool = False) -> None:
     logging.getLogger("requests").setLevel(logging.WARNING)
 
 
-def run_once(days: int | None = None, send: bool = True, output_file: str | None = None) -> None:
+def run_once(
+    days: int | None = None,
+    send: bool = True,
+    output_file: str | None = None,
+    outreach: bool = False,
+    outreach_dry_run: bool = False,
+) -> None:
     """Run a single analysis + report cycle."""
     logger = logging.getLogger("main")
 
@@ -97,7 +115,33 @@ def run_once(days: int | None = None, send: bool = True, output_file: str | None
             f.write(html)
         logger.info("HTML report saved to %s", output_file)
 
-    # Send email
+    # Run outreach if enabled
+    outreach_results = None
+    if outreach:
+        logger.info("Running outreach pipeline%s...", " (dry run)" if outreach_dry_run else "")
+        init_outreach_db()
+        outreach_results = run_outreach_pipeline(
+            results,
+            dry_run=outreach_dry_run,
+            send_immediately=True,
+        )
+
+        # Log outreach results
+        proc = outreach_results.get('processing', {})
+        sending = outreach_results.get('sending', {})
+        logger.info(
+            "Outreach: %d qualified, %d batches, %d sent",
+            proc.get('qualified', 0),
+            proc.get('batches_created', 0),
+            sending.get('sent', 0) if sending else 0,
+        )
+
+        # Send summary email
+        if not outreach_dry_run:
+            send_summary_email(outreach_results)
+            logger.info("Outreach summary email sent")
+
+    # Send report email
     if send:
         if config.SMTP_USER and config.EMAIL_TO:
             success = send_email(results)
@@ -109,7 +153,7 @@ def run_once(days: int | None = None, send: bool = True, output_file: str | None
             logger.warning("Email not configured (set SMTP_USER and EMAIL_TO in .env)")
 
 
-def run_scheduled() -> None:
+def run_scheduled(outreach: bool = True) -> None:
     """Run on a daily schedule."""
     import schedule
     import time
@@ -117,10 +161,14 @@ def run_scheduled() -> None:
     logger = logging.getLogger("main")
     logger.info("Scheduling daily run at %s", config.DAILY_SEND_TIME)
 
-    schedule.every().day.at(config.DAILY_SEND_TIME).do(run_once)
+    # Create scheduled job with outreach enabled
+    def scheduled_run():
+        run_once(outreach=outreach)
+
+    schedule.every().day.at(config.DAILY_SEND_TIME).do(scheduled_run)
 
     # Also run immediately on startup
-    run_once()
+    run_once(outreach=outreach)
 
     while True:
         schedule.run_pending()
@@ -151,17 +199,27 @@ def main() -> None:
         "--verbose", "-v", action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--outreach", action="store_true",
+        help="Enable automated IP outreach after analysis",
+    )
+    parser.add_argument(
+        "--outreach-dry-run", action="store_true",
+        help="Run outreach in dry-run mode (no actual emails sent)",
+    )
 
     args = parser.parse_args()
     setup_logging(args.verbose)
 
     if args.schedule:
-        run_scheduled()
+        run_scheduled(outreach=args.outreach)
     else:
         run_once(
             days=args.days,
             send=not args.no_email,
             output_file=args.output,
+            outreach=args.outreach,
+            outreach_dry_run=args.outreach_dry_run,
         )
 
 

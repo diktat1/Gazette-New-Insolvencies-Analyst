@@ -1,0 +1,21 @@
+Dear {{ recipient_name }},
+
+I noticed your recent appointments and wanted to express interest in the following opportunities:
+
+{% for notice in notices %}
+{{ loop.index }}. {{ notice.company_name }}
+   - Type: {{ notice.notice_type or 'Insolvency' }}
+   - Sector: {{ notice.sector or 'Various' }}
+   - Potential assets: {{ notice.estimated_assets|join(', ') or 'Business & Assets' }}
+{% endfor %}
+
+I'm actively acquiring businesses in these sectors and can move quickly on due diligence. I have funds available for suitable opportunities.
+
+Would any of these be suitable for a brief discussion?
+
+Best regards,
+{{ sender_name }}
+{% if sender_phone %}{{ sender_phone }}{% endif %}
+
+---
+If you'd prefer not to receive these emails, simply reply with "unsubscribe".
