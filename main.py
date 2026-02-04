@@ -175,6 +175,70 @@ def run_scheduled(outreach: bool = True) -> None:
         time.sleep(60)
 
 
+def run_test_email(test_email: str) -> None:
+    """Send a test outreach email to verify the system works."""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    logger = logging.getLogger("main")
+    logger.info("Sending test outreach email to %s", test_email)
+
+    # Build a sample email
+    sender_name = OUTREACH_CONFIG.get("sender_name", "Test Sender")
+    sender_phone = OUTREACH_CONFIG.get("sender_phone", "+44 000 000 0000")
+    sender_email = config.SMTP_USER
+
+    subject = "[TEST] Gazette Insolvency Outreach - System Test"
+    body = f"""Dear Insolvency Practitioner,
+
+This is a TEST EMAIL from the Gazette Insolvency Analyst outreach system.
+
+If you received this email, your outreach system is working correctly.
+
+---
+
+In a real outreach, this email would contain:
+- Company name and registration number
+- Notice type (administration, liquidation, etc.)
+- Opportunity score and key signals
+- Direct links to Companies House filings
+
+---
+
+This is an automated test. No action required.
+
+Best regards,
+{sender_name}
+{sender_phone}
+
+---
+Sent by Gazette Insolvency Analyst
+To stop receiving these emails, reply with "unsubscribe"
+"""
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = f"{sender_name} <{sender_email}>"
+    msg["To"] = test_email
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT) as server:
+            server.starttls()
+            server.login(config.SMTP_USER, config.SMTP_PASSWORD)
+            server.sendmail(sender_email, [test_email], msg.as_string())
+        logger.info("Test email sent successfully to %s", test_email)
+        print(f"\n✓ Test email sent to {test_email}")
+        print(f"  From: {sender_name} <{sender_email}>")
+        print(f"  Subject: {subject}")
+        print("\nCheck your inbox (and spam folder) to verify delivery.")
+    except Exception as e:
+        logger.error("Failed to send test email: %s", e)
+        print(f"\n✗ Failed to send test email: {e}")
+        raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="UK Gazette Insolvency Analyst – daily insolvency opportunity finder"
@@ -207,9 +271,19 @@ def main() -> None:
         "--outreach-dry-run", action="store_true",
         help="Run outreach in dry-run mode (no actual emails sent)",
     )
+    parser.add_argument(
+        "--test-email", type=str, default=None,
+        metavar="EMAIL",
+        help="Send a test outreach email to this address (skips Gazette scan)",
+    )
 
     args = parser.parse_args()
     setup_logging(args.verbose)
+
+    # Test mode - just send a test email and exit
+    if args.test_email:
+        run_test_email(args.test_email)
+        return
 
     if args.schedule:
         run_scheduled(outreach=args.outreach)
