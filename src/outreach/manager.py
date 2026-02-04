@@ -393,7 +393,8 @@ def run_outreach_pipeline(
 
     # Send if requested and batches were created
     if send_immediately and process_results['batches_created'] > 0:
-        results['sending'] = manager.send_pending()
+        max_sends = OUTREACH_CONFIG.get('MAX_SENDS_PER_RUN', 0) or None
+        results['sending'] = manager.send_pending(max_sends=max_sends)
 
     # Process follow-ups
     results['followups'] = manager.process_followups()

@@ -78,6 +78,9 @@ OUTREACH_CONFIG = {
 
     # Test mode - redirect all outreach to this email instead of real recipients
     'TEST_RECIPIENT_OVERRIDE': os.getenv('OUTREACH_TEST_RECIPIENT', ''),
+
+    # Max emails to send per run (0 = unlimited)
+    'MAX_SENDS_PER_RUN': _get_int('OUTREACH_MAX_SENDS', 0),
 }
 
 
