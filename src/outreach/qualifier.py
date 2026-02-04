@@ -61,7 +61,11 @@ def should_queue_outreach(notice, practitioners: Optional[list] = None) -> tuple
     # Gate 2: Must have at least one valid practitioner email
     valid_practitioners = get_valid_practitioners(practitioners)
     if not valid_practitioners:
-        return False, "No valid practitioner emails found"
+        # Log what we did find for debugging
+        if practitioners:
+            emails_found = [getattr(p, 'email', p.get('email') if isinstance(p, dict) else None) for p in practitioners]
+            return False, f"No valid emails in {len(practitioners)} practitioners: {emails_found}"
+        return False, "No practitioners found in notice"
 
     # Gate 3: Check blocklist
     for p in valid_practitioners:
@@ -122,7 +126,8 @@ def qualify_notices(notices: list, max_qualified: int = 0) -> tuple[list, list]:
                 'notice': notice,
                 'reason': reason,
             })
-            logger.debug("Skipped: %s - %s", notice.company_name, reason)
+            # Log skip reasons at INFO level for debugging
+            logger.info("Skipped: %s - %s", notice.company_name, reason)
 
     logger.info(
         "Qualification complete: %d qualified, %d skipped",
