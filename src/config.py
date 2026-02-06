@@ -59,7 +59,10 @@ DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "gaze
 # ---------------------------------------------------------------------------
 # Request settings
 # ---------------------------------------------------------------------------
-REQUEST_TIMEOUT = 30  # seconds
+REQUEST_TIMEOUT = 30  # seconds for general API requests
+
+# DuckDuckGo often blocks/times out - use a shorter timeout
+DUCKDUCKGO_TIMEOUT = int(os.getenv("DUCKDUCKGO_TIMEOUT", "5"))  # seconds
 REQUEST_HEADERS = {
     "User-Agent": "GazetteInsolvencyAnalyser/1.0",
     "Accept": "application/atom+xml",

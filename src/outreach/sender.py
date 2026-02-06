@@ -6,11 +6,13 @@ Handles:
 - Domain warm-up limits
 - Business hours enforcement
 - Delay between sends
+- Email tracking via message ID
 """
 
 import logging
 import smtplib
 import time
+import uuid
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -119,6 +121,7 @@ def send_email(
     cc_emails: Optional[list[str]] = None,
     html_body: Optional[str] = None,
     dry_run: bool = False,
+    message_id: Optional[str] = None,
 ) -> SendResult:
     """
     Send a single email.
@@ -199,6 +202,14 @@ def send_email(
     if cc_emails:
         msg['Cc'] = ', '.join(cc_emails)
 
+    # Add Message-ID for tracking and threading
+    if message_id:
+        msg['Message-ID'] = message_id
+    else:
+        # Generate a default message ID
+        domain = sender_email.split('@')[1] if '@' in sender_email else 'outreach.local'
+        msg['Message-ID'] = f"<{uuid.uuid4().hex}@{domain}>"
+
     # All recipients
     all_recipients = [to_email] + cc_emails
 
@@ -250,13 +261,14 @@ def send_with_delay(
     cc_emails: Optional[list[str]] = None,
     html_body: Optional[str] = None,
     dry_run: bool = False,
+    message_id: Optional[str] = None,
 ) -> SendResult:
     """
     Send email and wait for the configured delay afterward.
 
     This should be used when sending multiple emails to space them out.
     """
-    result = send_email(to_email, subject, body, cc_emails, html_body, dry_run)
+    result = send_email(to_email, subject, body, cc_emails, html_body, dry_run, message_id)
 
     if result.success and not dry_run:
         delay = OUTREACH_CONFIG.get('MIN_DELAY_BETWEEN_SENDS_SECONDS', 120)

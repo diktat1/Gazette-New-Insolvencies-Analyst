@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            border-bottom: 2px solid #2563eb;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .company-card {
+            background: #f8fafc;
+            border-left: 4px solid #2563eb;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .company-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1e40af;
+            margin: 0 0 8px 0;
+        }
+        .company-details {
+            color: #64748b;
+            font-size: 14px;
+        }
+        .company-details strong {
+            color: #475569;
+        }
+        .assets-list {
+            margin: 10px 0 0 0;
+            padding-left: 20px;
+        }
+        .assets-list li {
+            color: #475569;
+            margin: 4px 0;
+        }
+        .cta {
+            margin: 25px 0;
+        }
+        .signature {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+        .signature-name {
+            font-weight: 600;
+            color: #1e293b;
+        }
+        .signature-phone {
+            color: #2563eb;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <p>Dear {{ recipient_name }},</p>
+    </div>
+
+    <p>I noticed the recent <strong>{{ notice_type|lower }}</strong> appointment and wanted to express my interest:</p>
+
+    <div class="company-card">
+        <p class="company-name">{{ company_name }}</p>
+        <div class="company-details">
+            {% if company_number %}<p><strong>Company No:</strong> {{ company_number }}</p>{% endif %}
+            {% if sector %}<p><strong>Sector:</strong> {{ sector }}</p>{% endif %}
+            {% if estimated_assets %}
+            <p><strong>Potential Assets:</strong></p>
+            <ul class="assets-list">
+                {% for asset in estimated_assets %}
+                <li>{{ asset }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="cta">
+        <p>I'm actively acquiring businesses and can move quickly on due diligence. I have funds available for the right opportunity.</p>
+        <p><strong>Would this be suitable for a brief discussion?</strong></p>
+    </div>
+
+    <div class="signature">
+        <p class="signature-name">{{ sender_name }}</p>
+        {% if sender_phone %}<p class="signature-phone">{{ sender_phone }}</p>{% endif %}
+    </div>
+
+    <div class="footer">
+        <p>If you'd prefer not to receive these emails, simply reply with "unsubscribe".</p>
+    </div>
+</body>
+</html>

@@ -41,12 +41,12 @@ def _get_sender_info() -> dict:
     }
 
 
-def render_single_company_email(batch: OutreachBatchData) -> tuple[str, str]:
+def render_single_company_email(batch: OutreachBatchData) -> tuple[str, str, Optional[str]]:
     """
     Render email for a batch with a single company.
 
     Returns:
-        (subject, body)
+        (subject, body, html_body)
     """
     if not batch.notices:
         raise ValueError("Batch has no notices")
@@ -77,15 +77,24 @@ def render_single_company_email(batch: OutreachBatchData) -> tuple[str, str]:
         # Fallback to inline template
         body = _render_single_company_fallback(context)
 
-    return subject, body
+    # Try to render HTML version
+    html_body = None
+    try:
+        env = _get_env()
+        html_template = env.get_template("single_company.html")
+        html_body = html_template.render(**context)
+    except TemplateNotFound:
+        pass  # HTML template is optional
+
+    return subject, body, html_body
 
 
-def render_multi_company_email(batch: OutreachBatchData) -> tuple[str, str]:
+def render_multi_company_email(batch: OutreachBatchData) -> tuple[str, str, Optional[str]]:
     """
     Render email for a batch with multiple companies.
 
     Returns:
-        (subject, body)
+        (subject, body, html_body)
     """
     if not batch.notices:
         raise ValueError("Batch has no notices")
@@ -114,15 +123,24 @@ def render_multi_company_email(batch: OutreachBatchData) -> tuple[str, str]:
         # Fallback to inline template
         body = _render_multi_company_fallback(context)
 
-    return subject, body
+    # Try to render HTML version
+    html_body = None
+    try:
+        env = _get_env()
+        html_template = env.get_template("multi_company.html")
+        html_body = html_template.render(**context)
+    except TemplateNotFound:
+        pass  # HTML template is optional
+
+    return subject, body, html_body
 
 
-def render_batch_email(batch: OutreachBatchData) -> tuple[str, str]:
+def render_batch_email(batch: OutreachBatchData) -> tuple[str, str, Optional[str]]:
     """
     Render email for a batch (auto-selects single vs multi).
 
     Returns:
-        (subject, body)
+        (subject, body, html_body)
     """
     if len(batch.notices) == 1:
         return render_single_company_email(batch)
@@ -133,7 +151,7 @@ def render_batch_email(batch: OutreachBatchData) -> tuple[str, str]:
 def render_followup_email(
     batch: OutreachBatchData,
     followup_number: int = 1,
-) -> tuple[str, str]:
+) -> tuple[str, str, Optional[str]]:
     """
     Render a follow-up email.
 
@@ -142,7 +160,7 @@ def render_followup_email(
         followup_number: 1 for first follow-up, 2 for final
 
     Returns:
-        (subject, body)
+        (subject, body, html_body)
     """
     # Build subject (Re: original subject)
     if len(batch.notices) == 1:
@@ -177,7 +195,16 @@ def render_followup_email(
         # Fallback to inline template
         body = _render_followup_fallback(context)
 
-    return subject, body
+    # Try to render HTML version
+    html_body = None
+    try:
+        env = _get_env()
+        html_template = env.get_template(f"followup_{followup_number}.html")
+        html_body = html_template.render(**context)
+    except TemplateNotFound:
+        pass  # HTML template is optional
+
+    return subject, body, html_body
 
 
 # ---------------------------------------------------------------------------

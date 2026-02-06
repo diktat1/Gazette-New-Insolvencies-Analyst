@@ -33,6 +33,7 @@ class OutreachBatch:
     notices_json: str = "[]"
     subject: str = ""
     body: str = ""
+    html_body: Optional[str] = None  # HTML version of email body
     created_at: Optional[str] = None
     approved_at: Optional[str] = None
     sent_at: Optional[str] = None
@@ -40,6 +41,9 @@ class OutreachBatch:
     follow_up_count: int = 0
     next_follow_up_date: Optional[str] = None
     notes: str = ""
+    message_id: Optional[str] = None  # Unique message ID for tracking
+    opened_at: Optional[str] = None   # When email was first opened (if tracked)
+    clicked_at: Optional[str] = None  # When any link was clicked (if tracked)
 
     @property
     def recipients(self) -> list[dict]:
@@ -82,15 +86,37 @@ def init_outreach_db() -> None:
                 notices_json TEXT,
                 subject TEXT,
                 body TEXT,
+                html_body TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 approved_at TIMESTAMP,
                 sent_at TIMESTAMP,
                 replied_at TIMESTAMP,
                 follow_up_count INTEGER DEFAULT 0,
                 next_follow_up_date DATE,
-                notes TEXT
+                notes TEXT,
+                message_id TEXT,
+                opened_at TIMESTAMP,
+                clicked_at TIMESTAMP
             )
         """)
+
+        # Add new columns if they don't exist (for existing databases)
+        try:
+            conn.execute("ALTER TABLE outreach_batches ADD COLUMN html_body TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            conn.execute("ALTER TABLE outreach_batches ADD COLUMN message_id TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE outreach_batches ADD COLUMN opened_at TIMESTAMP")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE outreach_batches ADD COLUMN clicked_at TIMESTAMP")
+        except sqlite3.OperationalError:
+            pass
 
         # Individual notices within batches
         conn.execute("""
@@ -150,6 +176,7 @@ def create_batch(
     notices: list[dict],
     subject: str,
     body: str,
+    html_body: Optional[str] = None,
 ) -> int:
     """Create a new outreach batch. Returns the batch ID."""
     conn = _connect()
@@ -157,10 +184,10 @@ def create_batch(
         cursor = conn.execute(
             """
             INSERT INTO outreach_batches
-            (firm, recipients_json, notices_json, subject, body)
-            VALUES (?, ?, ?, ?, ?)
+            (firm, recipients_json, notices_json, subject, body, html_body)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (firm, json.dumps(recipients), json.dumps(notices), subject, body)
+            (firm, json.dumps(recipients), json.dumps(notices), subject, body, html_body)
         )
         batch_id = cursor.lastrowid
 
@@ -576,5 +603,112 @@ def get_all_batches(limit: int = 100) -> list[OutreachBatch]:
             (limit,)
         ).fetchall()
         return [OutreachBatch(**dict(row)) for row in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Email tracking
+# ---------------------------------------------------------------------------
+
+def generate_message_id(batch_id: int, domain: str = "outreach.local") -> str:
+    """Generate a unique message ID for email tracking."""
+    import uuid
+    unique_id = uuid.uuid4().hex[:12]
+    return f"<batch-{batch_id}-{unique_id}@{domain}>"
+
+
+def set_batch_message_id(batch_id: int, message_id: str) -> None:
+    """Set the message ID for a batch."""
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE outreach_batches SET message_id = ? WHERE id = ?",
+            (message_id, batch_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_batch_by_message_id(message_id: str) -> Optional[OutreachBatch]:
+    """Look up a batch by its message ID (for processing replies/webhooks)."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM outreach_batches WHERE message_id = ?",
+            (message_id,)
+        ).fetchone()
+        if row:
+            return OutreachBatch(**dict(row))
+        return None
+    finally:
+        conn.close()
+
+
+def record_email_opened(batch_id: int) -> None:
+    """Record that an email was opened (first open only)."""
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            UPDATE outreach_batches
+            SET opened_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND opened_at IS NULL
+            """,
+            (batch_id,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_link_clicked(batch_id: int) -> None:
+    """Record that a link in the email was clicked (first click only)."""
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            UPDATE outreach_batches
+            SET clicked_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND clicked_at IS NULL
+            """,
+            (batch_id,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_tracking_stats() -> dict:
+    """Get email tracking statistics."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*) as total_sent,
+                SUM(CASE WHEN opened_at IS NOT NULL THEN 1 ELSE 0 END) as total_opened,
+                SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) as total_clicked,
+                SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) as total_replied
+            FROM outreach_batches
+            WHERE status IN ('sent', 'replied', 'closed')
+            """
+        ).fetchone()
+
+        total_sent = row['total_sent'] if row else 0
+        total_opened = row['total_opened'] if row else 0
+        total_clicked = row['total_clicked'] if row else 0
+        total_replied = row['total_replied'] if row else 0
+
+        return {
+            'total_sent': total_sent,
+            'total_opened': total_opened,
+            'total_clicked': total_clicked,
+            'total_replied': total_replied,
+            'open_rate': (total_opened / total_sent * 100) if total_sent > 0 else 0,
+            'click_rate': (total_clicked / total_sent * 100) if total_sent > 0 else 0,
+            'reply_rate': (total_replied / total_sent * 100) if total_sent > 0 else 0,
+        }
     finally:
         conn.close()

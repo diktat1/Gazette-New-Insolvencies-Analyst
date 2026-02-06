@@ -12,9 +12,11 @@ Free API: https://developer.company-information.service.gov.uk/
 Rate limit: 600 requests per 5 minutes.
 """
 
+import json
 import logging
+import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -23,6 +25,66 @@ import requests
 from src import config
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Cache for Companies House lookups
+# ---------------------------------------------------------------------------
+_CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ch_cache.json")
+_CACHE_TTL_HOURS = 24  # How long to keep cached data
+_cache: dict = {}
+_cache_loaded = False
+
+
+def _load_cache() -> None:
+    """Load cache from disk."""
+    global _cache, _cache_loaded
+    if _cache_loaded:
+        return
+    try:
+        if os.path.exists(_CACHE_FILE):
+            with open(_CACHE_FILE, 'r') as f:
+                _cache = json.load(f)
+            # Clean expired entries
+            now = datetime.utcnow().isoformat()
+            expired = [k for k, v in _cache.items() if v.get('expires', '') < now]
+            for k in expired:
+                del _cache[k]
+            logger.debug("Loaded CH cache with %d entries (%d expired)", len(_cache) + len(expired), len(expired))
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning("Could not load CH cache: %s", e)
+        _cache = {}
+    _cache_loaded = True
+
+
+def _save_cache() -> None:
+    """Save cache to disk."""
+    try:
+        os.makedirs(os.path.dirname(_CACHE_FILE), exist_ok=True)
+        with open(_CACHE_FILE, 'w') as f:
+            json.dump(_cache, f)
+    except IOError as e:
+        logger.warning("Could not save CH cache: %s", e)
+
+
+def _get_cached(key: str) -> Optional[dict]:
+    """Get a cached API response if not expired."""
+    _load_cache()
+    entry = _cache.get(key)
+    if not entry:
+        return None
+    if entry.get('expires', '') < datetime.utcnow().isoformat():
+        del _cache[key]
+        return None
+    logger.debug("CH cache hit for %s", key)
+    return entry.get('data')
+
+
+def _set_cached(key: str, data: dict) -> None:
+    """Cache an API response."""
+    _load_cache()
+    expires = (datetime.utcnow() + timedelta(hours=_CACHE_TTL_HOURS)).isoformat()
+    _cache[key] = {'data': data, 'expires': expires}
+    _save_cache()
 
 CH_WEB_BASE = "https://find-and-update.company-information.service.gov.uk"
 
@@ -90,11 +152,22 @@ class CompanyProfile:
     phantom_reasons: list = field(default_factory=list)
 
 
-def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
+def _api_get(endpoint: str, params: Optional[dict] = None, use_cache: bool = True) -> Optional[dict]:
     """Make an authenticated GET request to the Companies House API."""
     if not config.COMPANIES_HOUSE_API_KEY:
         logger.warning("No Companies House API key configured – skipping lookup")
         return None
+
+    # Build cache key from endpoint and params
+    cache_key = endpoint
+    if params:
+        cache_key += "?" + "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+
+    # Check cache first
+    if use_cache:
+        cached = _get_cached(cache_key)
+        if cached is not None:
+            return cached
 
     url = f"{config.COMPANIES_HOUSE_BASE_URL}{endpoint}"
     try:
@@ -110,9 +183,15 @@ def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
         if resp.status_code == 429:
             logger.warning("Companies House rate limit hit – backing off 60s")
             time.sleep(60)
-            return _api_get(endpoint, params)
+            return _api_get(endpoint, params, use_cache=False)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+
+        # Cache successful responses
+        if use_cache and data:
+            _set_cached(cache_key, data)
+
+        return data
     except requests.RequestException as exc:
         logger.error("Companies House API error for %s: %s", endpoint, exc)
         return None

@@ -149,10 +149,12 @@ def _search_for_website(company_name: str) -> list[str]:
     query = f"{company_name} UK"
     url = f"https://lite.duckduckgo.com/lite/?q={quote_plus(query)}"
 
+    # Use shorter timeout for DuckDuckGo - it often blocks or is slow
+    ddg_timeout = getattr(config, 'DUCKDUCKGO_TIMEOUT', 5)
     try:
         resp = requests.get(
             url,
-            timeout=config.REQUEST_TIMEOUT,
+            timeout=ddg_timeout,
             headers={
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -160,7 +162,7 @@ def _search_for_website(company_name: str) -> list[str]:
         )
         resp.raise_for_status()
     except requests.RequestException as exc:
-        logger.warning("DuckDuckGo search failed: %s", exc)
+        logger.debug("DuckDuckGo search failed (timeout=%ds): %s", ddg_timeout, exc)
         return []
 
     # Parse results

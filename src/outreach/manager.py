@@ -28,6 +28,8 @@ from src.outreach.db import (
     can_send_today,
     record_company_contacted,
     add_to_blocklist,
+    generate_message_id,
+    set_batch_message_id,
     OutreachBatch,
 )
 from src.outreach.qualifier import qualify_notices, get_valid_practitioners
@@ -126,8 +128,8 @@ class OutreachManager:
         batch_ids = []
 
         for batch_data in batches:
-            # Render email
-            subject, body = render_batch_email(batch_data)
+            # Render email (includes HTML version if available)
+            subject, body, html_body = render_batch_email(batch_data)
 
             # Create database record
             batch_id = create_batch(
@@ -136,6 +138,7 @@ class OutreachManager:
                 notices=[n.to_dict() for n in batch_data.notices],
                 subject=subject,
                 body=body,
+                html_body=html_body,
             )
 
             batch_ids.append(batch_id)
@@ -247,6 +250,11 @@ class OutreachManager:
         primary = recipients[0]
         cc_emails = [r['email'] for r in recipients[1:]]
 
+        # Generate unique message ID for tracking
+        sender_email = OUTREACH_CONFIG.get('SENDER_EMAIL', '')
+        domain = sender_email.split('@')[1] if '@' in sender_email else 'outreach.local'
+        message_id = generate_message_id(batch.id, domain)
+
         if self.dry_run:
             logger.info(
                 "[DRY RUN] Would send to %s (CC: %s): %s",
@@ -258,19 +266,23 @@ class OutreachManager:
                 'to': primary['email'],
                 'cc': cc_emails,
                 'subject': batch.subject,
+                'message_id': message_id,
             }
 
-        # Send with delay
+        # Send with delay (include HTML body if available)
         result = send_with_delay(
             to_email=primary['email'],
             subject=batch.subject,
             body=batch.body,
             cc_emails=cc_emails,
+            html_body=batch.html_body,
+            message_id=message_id,
         )
 
         if result.success:
-            # Update status
+            # Update status and save message ID
             update_batch_status(batch.id, 'sent')
+            set_batch_message_id(batch.id, message_id)
 
             # Record company contacts
             for notice in batch.notices:
@@ -278,12 +290,13 @@ class OutreachManager:
                 if company_number:
                     record_company_contacted(company_number, batch.id)
 
-            logger.info("Sent batch #%d to %s", batch.id, primary['email'])
+            logger.info("Sent batch #%d to %s (Message-ID: %s)", batch.id, primary['email'], message_id)
 
             return {
                 'success': True,
                 'to': primary['email'],
                 'cc': cc_emails,
+                'message_id': message_id,
             }
         else:
             logger.error("Failed to send batch #%d: %s", batch.id, result.error)
