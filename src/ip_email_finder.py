@@ -1,15 +1,17 @@
 """
 IP Email Finder - Look up Insolvency Practitioner email addresses.
 
-Strategies:
-1. Extract email from notice (already done in notice_parser)
-2. Look up from known firm emails (fast)
-3. Search Insolvency Service register
-4. Guess firm website and find contact page
-5. Web search for "[firm name] insolvency practitioners contact"
+Strategies (in order of priority):
+1. Local IP register database (cached from official sources - see ip_register.py)
+2. Known firm emails (fast fallback for major firms)
+3. Search Insolvency Service register (gov.uk)
+4. Guess firm website and scrape contact page
 
 This module provides fallback email lookup when the Gazette notice
 doesn't include the IP's email address directly.
+
+For best results, build the local register first:
+    python scripts/build_ip_register.py --known-firms --scrape
 """
 
 import logging
@@ -23,6 +25,44 @@ logger = logging.getLogger(__name__)
 # Insolvency Service IP Register URLs
 _IP_REGISTER_SEARCH = "https://www.insolvencydirect.bis.gov.uk/eiir/IIRSearch.asp"
 _IP_REGISTER_DETAIL = "https://www.insolvencydirect.bis.gov.uk/eiir/"
+
+
+def find_ip_email(name: str, firm: str = "") -> Optional[str]:
+    """
+    Main entry point - find an IP's email using all available methods.
+
+    This is the recommended function to call from other modules.
+    It checks the local register first, then falls back to other methods.
+
+    Args:
+        name: IP's full name
+        firm: IP's firm name (optional but improves accuracy)
+
+    Returns:
+        Email address if found, None otherwise
+    """
+    # Strategy 1: Try the local register first (fastest, most complete)
+    try:
+        from src.ip_register import get_ip_email
+        email = get_ip_email(name, firm)
+        if email:
+            logger.debug("Found IP email in register: %s -> %s", name, email)
+            return email
+    except ImportError:
+        logger.debug("IP register module not available, using fallbacks")
+
+    # Strategy 2: Known firms list
+    if firm:
+        email = get_known_firm_email(firm)
+        if email:
+            return email
+
+    # Strategy 3: Full contact lookup (includes gov.uk and website scraping)
+    result = find_ip_contact_details(name, firm)
+    if result and result.get('email'):
+        return result['email']
+
+    return None
 
 # Common UK IP firm domain patterns
 _DOMAIN_SUFFIXES = ['.co.uk', '.com', '.uk', '.org.uk']

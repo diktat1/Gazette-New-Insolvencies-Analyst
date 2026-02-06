@@ -15,13 +15,21 @@ from typing import Optional
 
 from src.outreach.db import is_email_blocked, was_company_contacted_recently
 from src.outreach.config import OUTREACH_CONFIG
-from src.ip_email_finder import find_ip_email_from_firm, get_known_firm_email
+from src.ip_email_finder import find_ip_email
 
 logger = logging.getLogger(__name__)
 
 
 def _try_find_practitioner_email(practitioner) -> Optional[str]:
-    """Try to find email for a practitioner via firm lookup."""
+    """
+    Try to find email for a practitioner using all available methods.
+
+    Uses the unified find_ip_email function which checks:
+    1. Local IP register database
+    2. Known firms list
+    3. Gov.uk register
+    4. Firm website scraping
+    """
     if isinstance(practitioner, dict):
         firm = practitioner.get('firm', '')
         name = practitioner.get('name', '')
@@ -29,17 +37,10 @@ def _try_find_practitioner_email(practitioner) -> Optional[str]:
         firm = getattr(practitioner, 'firm', '')
         name = getattr(practitioner, 'name', '')
 
-    if not firm:
+    if not name and not firm:
         return None
 
-    # Try known firm emails first (fast)
-    email = get_known_firm_email(firm)
-    if email:
-        return email
-
-    # Try firm website lookup (slower)
-    email = find_ip_email_from_firm(firm, name)
-    return email
+    return find_ip_email(name, firm)
 
 
 def is_valid_email(email: str) -> bool:
