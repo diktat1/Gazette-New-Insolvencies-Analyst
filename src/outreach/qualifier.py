@@ -15,8 +15,31 @@ from typing import Optional
 
 from src.outreach.db import is_email_blocked, was_company_contacted_recently
 from src.outreach.config import OUTREACH_CONFIG
+from src.ip_email_finder import find_ip_email_from_firm, get_known_firm_email
 
 logger = logging.getLogger(__name__)
+
+
+def _try_find_practitioner_email(practitioner) -> Optional[str]:
+    """Try to find email for a practitioner via firm lookup."""
+    if isinstance(practitioner, dict):
+        firm = practitioner.get('firm', '')
+        name = practitioner.get('name', '')
+    else:
+        firm = getattr(practitioner, 'firm', '')
+        name = getattr(practitioner, 'name', '')
+
+    if not firm:
+        return None
+
+    # Try known firm emails first (fast)
+    email = get_known_firm_email(firm)
+    if email:
+        return email
+
+    # Try firm website lookup (slower)
+    email = find_ip_email_from_firm(firm, name)
+    return email
 
 
 def is_valid_email(email: str) -> bool:
@@ -61,10 +84,27 @@ def should_queue_outreach(notice, practitioners: Optional[list] = None) -> tuple
     # Gate 2: Must have at least one valid practitioner email
     valid_practitioners = get_valid_practitioners(practitioners)
     if not valid_practitioners:
+        # Try to look up emails for practitioners without them
+        for p in practitioners:
+            existing_email = getattr(p, 'email', None) or (p.get('email') if isinstance(p, dict) else None)
+            if not existing_email or not is_valid_email(existing_email):
+                found_email = _try_find_practitioner_email(p)
+                if found_email:
+                    # Update the practitioner with found email
+                    if isinstance(p, dict):
+                        p['email'] = found_email
+                    else:
+                        p.email = found_email
+                    logger.info("Found email via firm lookup: %s", found_email)
+
+        # Check again after lookup
+        valid_practitioners = get_valid_practitioners(practitioners)
+
+    if not valid_practitioners:
         # Log what we did find for debugging
         if practitioners:
-            emails_found = [getattr(p, 'email', p.get('email') if isinstance(p, dict) else None) for p in practitioners]
-            return False, f"No valid emails in {len(practitioners)} practitioners: {emails_found}"
+            firms_found = [getattr(p, 'firm', p.get('firm') if isinstance(p, dict) else None) for p in practitioners]
+            return False, f"No valid emails in {len(practitioners)} practitioners (firms: {firms_found})"
         return False, "No practitioners found in notice"
 
     # Gate 3: Check blocklist
