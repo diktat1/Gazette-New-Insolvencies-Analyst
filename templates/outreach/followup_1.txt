@@ -1,0 +1,14 @@
+Dear {{ recipient_name }},
+
+I wanted to follow up on my email from last week regarding {% if total_companies == 1 %}{{ notices[0].company_name }}{% else %}the {{ total_companies }} opportunities I mentioned{% endif %}.
+
+I remain interested in exploring {% if total_companies == 1 %}this opportunity{% else %}these opportunities{% endif %} and am happy to work around your timeline.
+
+Would a brief call this week be possible?
+
+Best regards,
+{{ sender_name }}
+{% if sender_phone %}{{ sender_phone }}{% endif %}
+
+---
+If you'd prefer not to receive these emails, simply reply with "unsubscribe".

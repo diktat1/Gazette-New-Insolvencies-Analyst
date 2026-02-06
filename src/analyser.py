@@ -135,11 +135,17 @@ def _analyse_single(entry: GazetteEntry) -> AnalysedNotice:
     # -----------------------------------------------------------------------
     # Step 3: Website lookup (web search + cross-check)
     # -----------------------------------------------------------------------
-    website = find_website(
-        notice.company_name,
-        registered_address=notice.registered_address,
-        company_number=notice.company_number,
-    )
+    # Skip website check if SKIP_WEBSITE_CHECK is set (speeds up test mode)
+    import os
+    if os.getenv('SKIP_WEBSITE_CHECK', '').lower() in ('true', '1', 'yes'):
+        website = None
+        logger.debug("Skipping website check (SKIP_WEBSITE_CHECK=true)")
+    else:
+        website = find_website(
+            notice.company_name,
+            registered_address=notice.registered_address,
+            company_number=notice.company_number,
+        )
     notice.website_url = website
     notice.google_search_url = build_google_search_url(notice.company_name)
 

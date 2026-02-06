@@ -1,0 +1,20 @@
+Dear {{ recipient_name }},
+
+I noticed the recent {{ notice_type|lower }} of {{ company_name }}{% if company_number %} (Company No: {{ company_number }}){% endif %}.
+
+{% if sector -%}
+As a {{ sector|lower }} sector opportunity, I would be particularly interested in: {{ estimated_assets|join(', ') or 'the business and its assets' }}.
+{% else -%}
+I would be interested in discussing: {{ estimated_assets|join(', ') or 'the business and its assets' }}.
+{% endif %}
+
+I'm actively acquiring businesses and can move quickly on due diligence. I have funds available for the right opportunity.
+
+Would this be suitable for a brief discussion?
+
+Best regards,
+{{ sender_name }}
+{% if sender_phone %}{{ sender_phone }}{% endif %}
+
+---
+If you'd prefer not to receive these emails, simply reply with "unsubscribe".

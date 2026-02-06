@@ -1,0 +1,14 @@
+Dear {{ recipient_name }},
+
+I wanted to follow up one last time regarding {% if total_companies == 1 %}{{ notices[0].company_name }}{% else %}the {{ total_companies }} opportunities I mentioned{% endif %}.
+
+If there's an opportunity to discuss or if the assets/business are still available, I remain interested and can move quickly.
+
+If this isn't suitable or the opportunity has passed, no need to reply - I'll remove this from my list.
+
+Best regards,
+{{ sender_name }}
+{% if sender_phone %}{{ sender_phone }}{% endif %}
+
+---
+If you'd prefer not to receive these emails, simply reply with "unsubscribe".
